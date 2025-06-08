@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+xgboost
+joblib
+numpy
+pydantic
+python-multipart
+aiofiles
+python-whois
+dnspython
