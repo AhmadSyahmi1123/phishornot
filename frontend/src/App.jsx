@@ -12,7 +12,7 @@ function App() {
     setResult(null);
 
     try {
-      const response = await fetch('https://phishornot-api.onrender.com/predict', {
+      const response = await fetch('https://phishornot.onrender.com/predict', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
