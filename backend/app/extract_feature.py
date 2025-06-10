@@ -6,6 +6,8 @@ import tldextract
 from urllib.parse import urlparse
 from collections import Counter
 import xgboost as xgb
+from tqdm import tqdm
+import pandas as pd
 
 # -------------------- CHARACTER STATS --------------------
 def get_no_of_digits_in_url(url):
@@ -36,7 +38,7 @@ def having_special_char_in_domain(url):
     ext = tldextract.extract(url)
     domain = f"{ext.domain}.{ext.suffix}"
     # Allow only letters, digits, hyphens, and dots
-    return bool(re.search(r'[^a-zA-Z0-9.-]', domain))
+    return int(bool(re.search(r'[^a-zA-Z0-9.-]', domain)))
 
 def number_of_special_char_in_domain(url):
     ext = tldextract.extract(url)
@@ -103,10 +105,10 @@ def having_special_char_in_subdomain(url):
     extracted = tldextract.extract(url)
     subdomain = extracted.subdomain
     if not subdomain:
-        return False
+        return 0
     # Define allowed characters (letters, digits, hyphen), everything else is special
     # If you want to consider underscore or others, add them here
-    return bool(re.search(r'[^a-zA-Z0-9\-]', subdomain))
+    return int(bool(re.search(r'[^a-zA-Z0-9\-]', subdomain)))
 
 def number_of_special_char_in_subdomain(url):
     ext = tldextract.extract(url)
@@ -133,7 +135,7 @@ def having_repeated_digits_in_subdomain(url):
     return int(any(count > 1 for count in digit_counts.values()))
 
 def having_path(parsed):
-    return bool(parsed.path and parsed.path != "/")
+    return int(bool(parsed.path and parsed.path != "/"))
 
 def calculate_entropy(url):
     if not url:
@@ -191,9 +193,9 @@ def extract_url_features(url):
     
     has_path = having_path(parsed)
     path_length = len(path)
-    has_query = bool(parsed.query)
-    has_fragment = bool(parsed.fragment)
-    has_anchor = bool(parsed.fragment)
+    has_query = int(bool(parsed.query))
+    has_fragment = int(bool(parsed.fragment))
+    has_anchor = int(bool(parsed.fragment))
     url_entropy = calculate_entropy(url)
     domain_entropy = calculate_entropy(domain)
     
@@ -210,9 +212,9 @@ def extract_url_features(url):
     ]
 
 if __name__ == "__main__":
-    url = input("Enter URL: ")
+    #url = input("Enter URL: ")
 
-    model = joblib.load("model.joblib")
+    #model = joblib.load("model.joblib")
     
     feature_names = [
     'url_length', 'number_of_dots_in_url', 'having_repeated_digits_in_url', 'number_of_digits_in_url',
@@ -229,12 +231,12 @@ if __name__ == "__main__":
     'having_query', 'having_fragment', 'having_anchor', 'entropy_of_url', 'entropy_of_domain'
     ]
     
-    features = extract_url_features(url)
-    print("Feature vector length:", len(features))
+    #features = extract_url_features(url)
+    #print("Feature vector length:", len(features))
     
-    dfeatures = xgb.DMatrix(np.array(features).reshape(1, -1), feature_names=feature_names)
-    prediction_prob = model.predict(dfeatures)[0]
-    prediction = int(prediction_prob > 0.5)
-    status = "legitimate" if prediction == 0 else "phishing"
+    #dfeatures = xgb.DMatrix(np.array(features).reshape(1, -1), feature_names=feature_names)
+    #prediction_prob = model.predict(dfeatures)[0]
+    #prediction = int(prediction_prob > 0.5)
+    #status = "legitimate" if prediction == 0 else "phishing"
 
-    print(status)
+    #print(status)
