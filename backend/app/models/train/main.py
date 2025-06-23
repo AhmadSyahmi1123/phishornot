@@ -1,70 +1,100 @@
 import pandas as pd
 import joblib
-import xgboost as xgb
-from xgboost import XGBClassifier
+import torch
+import torch.nn as nn
+import torch.optim as optim
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import classification_report, accuracy_score
-import lime
-import lime.lime_tabular
+from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
+from torch.utils.data import TensorDataset, DataLoader
 
-df = pd.read_csv('backend/app/models/train/datasets/dataset_with_features.csv')
+# Load the dataset
+df = pd.read_csv('backend/app/models/train/datasets/phishing_legit_dataset_with_features.csv')
 
-X=df.drop(['Type'], axis=1)
-y=df['Type']
+# Drop unwanted columns
+X = df.drop(['url', 'label'], axis=1)
+y = df['label'].astype(int)
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+# Train-test split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-y_train = pd.to_numeric(y_train, errors='coerce')
-y_test = pd.to_numeric(y_test, errors='coerce')
-
-# Standardize the data to have zero mean and unit variance
+# Scale the features
 scaler = StandardScaler()
 X_train_scaled = scaler.fit_transform(X_train)
 X_test_scaled = scaler.transform(X_test)
 
-# Convert y_train and y_test to numeric
-y_train_numeric = y_train.astype(int)
-y_test_numeric = y_test.astype(int)
+# Save the scaler
+joblib.dump(scaler, 'backend/app/models/scaler.pkl')
 
-pos = sum(y_train_numeric)
-neg = len(y_train_numeric) - pos
-scale = neg / pos
+# Convert to PyTorch tensors
+X_train_tensor = torch.tensor(X_train_scaled, dtype=torch.float32)
+y_train_tensor = torch.tensor(y_train.values, dtype=torch.float32)
 
-model = XGBClassifier(
-    objective='binary:logistic',
-    eval_metric='logloss',
-    eta=0.1,
-    max_depth=10,
-    subsample=0.8,
-    colsample_bytree=0.8,
-    seed=42,
-    scale_pos_weight=scale,
-    n_estimators=863  # match your boosting rounds
-)
+X_test_tensor = torch.tensor(X_test_scaled, dtype=torch.float32)
+y_test_tensor = torch.tensor(y_test.values, dtype=torch.float32)
 
-model.fit(X_train_scaled, y_train_numeric)
+# Create DataLoaders
+train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
+train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
 
-# Predict on test set
-y_pred_prob = model.predict(X_test_scaled)
-y_pred = (y_pred_prob > 0.5).astype(int)
+# Define a simple feedforward neural network
+class Net(nn.Module):
+    def __init__(self, input_dim):
+        super(Net, self).__init__()
+        self.fc1 = nn.Linear(input_dim, 128)
+        self.relu1 = nn.ReLU()
+        self.fc2 = nn.Linear(128, 64)
+        self.relu2 = nn.ReLU()
+        self.output = nn.Linear(64, 1)
+        self.sigmoid = nn.Sigmoid()
 
-# Evaluate performance
-accuracy = accuracy_score(y_test, y_pred)
-print(f"Accuracy: {accuracy:.4f}")
+    def forward(self, x):
+        x = self.relu1(self.fc1(x))
+        x = self.relu2(self.fc2(x))
+        x = self.sigmoid(self.output(x))
+        return x
 
+# Initialize the model
+input_dim = X_train_tensor.shape[1]
+model = Net(input_dim)
+
+# Move to GPU if available
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+model.to(device)
+X_test_tensor = X_test_tensor.to(device)
+y_test_tensor = y_test_tensor.to(device)
+
+# Loss and optimizer
+criterion = nn.BCELoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+# Train the model
+epochs = 20
+for epoch in range(epochs):
+    model.train()
+    total_loss = 0
+    for batch_X, batch_y in train_loader:
+        batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+        optimizer.zero_grad()
+        outputs = model(batch_X).squeeze()
+        loss = criterion(outputs, batch_y)
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+    print(f"Epoch {epoch+1}/{epochs}, Loss: {total_loss:.4f}")
+
+# Evaluate
+model.eval()
+with torch.no_grad():
+    y_pred_prob = model(X_test_tensor).squeeze()
+    y_pred = (y_pred_prob > 0.5).int()
+
+accuracy = accuracy_score(y_test_tensor.cpu(), y_pred.cpu())
+print(f"\nAccuracy: {accuracy:.4f}")
 print("\nClassification Report:")
-print(classification_report(y_test, y_pred))
+print(classification_report(y_test_tensor.cpu(), y_pred.cpu()))
+print("\nConfusion Matrix:")
+print(confusion_matrix(y_test_tensor.cpu(), y_pred.cpu()))
 
-explainer = lime.lime_tabular.LimeTabularExplainer(
-    training_data=X_train_scaled,
-    feature_names=X.columns.tolist(),
-    class_names=['Legitimate', 'Phishing'],
-    mode='classification'
-)
-
-i = 0
-exp = explainer.explain_instance(X_test_scaled[i], model.predict_proba, num_features=10)
-exp.save_to_file('lime_explanation.html')
-
-joblib.dump(model, 'backend/app/models/model.pkl')
+# Save model
+torch.save(model.state_dict(), 'backend/app/models/model.pth')

@@ -1,11 +1,15 @@
-import re
 from urllib.parse import urlparse
-import joblib
-import numpy as np
+import re
+import pandas as pd
 import math
 from collections import Counter
 import tldextract
-import pandas as pd
+
+# Load dataset
+df = pd.read_csv("backend/app/models/train/datasets/phishing_legit_dataset.csv", dtype={"label": int})
+print(df.head())
+
+df = df[df["url"].apply(lambda x: isinstance(x, str))].copy()
 
 SUSPICIOUS_WORDS = ["secure", "account", "login", "bank", "verify", "update", "password"]
 SHORTENERS = ["bit.ly", "goo.gl", "tinyurl", "ow.ly", "t.co", "is.gd", "buff.ly", "adf.ly", "cutt.ly"]
@@ -97,22 +101,10 @@ def extract_features(url):
 
     return features
 
-def normalize_url(url):
-    return url.rstrip("/") if url.endswith("/") and url.count("/") <= 3 else url
+# Extract features into DataFrame with column names
+features_df = df["url"].apply(extract_features).apply(pd.Series)
 
-if __name__ == "__main__":
-    while True:
-        url = input("Enter URL: ")
-        
-        model = joblib.load("backend/app/models/model.pkl")
-        scaler = joblib.load("backend/app/models/scaler.pkl")
-        
-        features = extract_features(normalize_url(url))
-        
-        dfeatures = np.array(list(features.values())).reshape(1, -1)
-        
-        prediction_prob = model.predict_proba(dfeatures)[0][1]
-        prediction = int(prediction_prob > 0.5)
-        status = "legitimate" if prediction == 1 else "phishing"
+df_combined = pd.concat([df.reset_index(drop=True), features_df.reset_index(drop=True)], axis=1)
 
-        print(status)
+df_combined.to_csv("backend/app/models/train/datasets/phishing_legit_dataset_with_features.csv", index=False)
+print("✅ Saved phishing_legit_dataset_with_features.csv with proper column names.")

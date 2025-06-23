@@ -1,23 +1,53 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import xgboost as xgb
 import joblib
 import numpy as np
-from backend.app.extract_feature import extract_url_features
+from backend.app.extract_feature import extract_features
+import torch
+import torch.nn as nn
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # You can restrict this in production
+    allow_origins=["*"],  # Restrict this in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Load model
+# Load model and scaler (if used)
 model = joblib.load('backend/app/models/model.pkl')
+class Net(nn.Module):
+    def __init__(self, input_dim):
+        super(Net, self).__init__()
+        self.fc1 = nn.Linear(input_dim, 128)
+        self.relu1 = nn.ReLU()
+        self.fc2 = nn.Linear(128, 64)
+        self.relu2 = nn.ReLU()
+        self.output = nn.Linear(64, 1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        x = self.relu1(self.fc1(x))
+        x = self.relu2(self.fc2(x))
+        x = self.sigmoid(self.output(x))
+        return x
+    
+# Load scaler
+scaler = joblib.load('backend/app/models/scaler.pkl')
+
+# Load model
+input_dim =  44
+model = Net(input_dim)
+model.load_state_dict(torch.load('backend/app/models/model.pth', map_location=torch.device('cpu')))
+model.eval()
+
+# URL normalization
+def normalize_url(url: str) -> str:
+    # Strip trailing slash only if it's a shallow path (not /a/b/c/)
+    return url.rstrip("/") if url.endswith("/") and url.count("/") <= 3 else url
 
 # Define input schema
 class URLRequest(BaseModel):
@@ -26,31 +56,30 @@ class URLRequest(BaseModel):
 @app.post("/predict")
 def predict(request: URLRequest):
     try:
-        feature_names = [
-        'url_length', 'number_of_dots_in_url', 'having_repeated_digits_in_url', 'number_of_digits_in_url',
-        'number_of_special_char_in_url', 'number_of_hyphens_in_url', 'number_of_underline_in_url', 
-        'number_of_slash_in_url', 'number_of_questionmark_in_url', 'number_of_equal_in_url', 
-        'number_of_at_in_url', 'number_of_dollar_in_url', 'number_of_exclamation_in_url', 
-        'number_of_hashtag_in_url', 'number_of_percent_in_url', 'domain_length', 'number_of_dots_in_domain',
-        'number_of_hyphens_in_domain', 'having_special_characters_in_domain', 'number_of_special_characters_in_domain',
-        'having_digits_in_domain', 'number_of_digits_in_domain', 'having_repeated_digits_in_domain',
-        'number_of_subdomains', 'having_dot_in_subdomain', 'having_hyphen_in_subdomain', 
-        'average_subdomain_length', 'average_number_of_dots_in_subdomain', 'average_number_of_hyphens_in_subdomain',
-        'having_special_characters_in_subdomain', 'number_of_special_characters_in_subdomain', 'having_digits_in_subdomain',
-        'number_of_digits_in_subdomain', 'having_repeated_digits_in_subdomain', 'having_path', 'path_length',
-        'having_query', 'having_fragment', 'having_anchor', 'entropy_of_url', 'entropy_of_domain'
-        ]
-        
-        features = extract_url_features(request.url)
-        dmatrix = xgb.DMatrix(np.array(features).reshape(1, -1), feature_names=feature_names)
-        prob = model.predict(dmatrix)[0]
-        prediction = int(prob > 0.5)
-        status = "legitimate" if prediction == 0 else "phishing"
+        cleaned_url = normalize_url(request.url)
+
+        # Extract features
+        features = extract_features(cleaned_url)
+        X = np.array(list(features.values())).reshape(1, -1)
+        X_scaled = scaler.transform(X)
+
+        # Convert to tensor
+        input_tensor = torch.tensor(X_scaled, dtype=torch.float32)
+
+        # Predict using PyTorch model
+        with torch.no_grad():
+            output = model(input_tensor)
+            prob = output.item()
+            prediction = int(prob > 0.5)
+
+        status = "legitimate" if prediction == 1 else "phishing"
 
         return {
             "url": request.url,
+            "normalized_url": cleaned_url,
             "is_phishing": status,
             "confidence": float(prob)
         }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
