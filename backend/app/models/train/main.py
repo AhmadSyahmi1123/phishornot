@@ -69,7 +69,7 @@ criterion = nn.BCELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 # Train the model
-epochs = 20
+epochs = 100
 for epoch in range(epochs):
     model.train()
     total_loss = 0
