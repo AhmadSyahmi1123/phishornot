@@ -4,45 +4,21 @@ from pydantic import BaseModel
 import joblib
 import numpy as np
 from backend.app.extract_feature import extract_features
-import torch
-import torch.nn as nn
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restrict this in production
+    allow_origins=["*"],  # ⚠️ In production, restrict to your frontend domain
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Load model and scaler (if used)
-model = joblib.load('backend/app/models/model.pkl')
-class Net(nn.Module):
-    def __init__(self, input_dim):
-        super(Net, self).__init__()
-        self.fc1 = nn.Linear(input_dim, 128)
-        self.relu1 = nn.ReLU()
-        self.fc2 = nn.Linear(128, 64)
-        self.relu2 = nn.ReLU()
-        self.output = nn.Linear(64, 1)
-        self.sigmoid = nn.Sigmoid()
-
-    def forward(self, x):
-        x = self.relu1(self.fc1(x))
-        x = self.relu2(self.fc2(x))
-        x = self.sigmoid(self.output(x))
-        return x
-    
-# Load scaler
-scaler = joblib.load('backend/app/models/scaler.pkl')
-
-# Load model
-input_dim =  44
-model = Net(input_dim)
-model.load_state_dict(torch.load('backend/app/models/model.pth', map_location=torch.device('cpu')))
-model.eval()
+# ✅ Load trained XGBoost model
+model_path = "backend/app/models/train/output_xgb/xgboost_url_phishing.joblib"
+model = joblib.load(model_path)
+print("✅ XGBoost model loaded successfully")
 
 # URL normalization
 def normalize_url(url: str) -> str:
@@ -61,18 +37,12 @@ def predict(request: URLRequest):
         # Extract features
         features = extract_features(cleaned_url)
         X = np.array(list(features.values())).reshape(1, -1)
-        X_scaled = scaler.transform(X)
 
-        # Convert to tensor
-        input_tensor = torch.tensor(X_scaled, dtype=torch.float32)
+        # Predict using XGBoost
+        prob = model.predict_proba(X)[0][1]  # probability of class "phishing"
+        prediction = int(prob > 0.5)
 
-        # Predict using PyTorch model
-        with torch.no_grad():
-            output = model(input_tensor)
-            prob = output.item()
-            prediction = int(prob > 0.5)
-
-        status = "legitimate" if prediction == 1 else "phishing"
+        status = "phishing" if prediction == 1 else "legitimate"
 
         return {
             "url": request.url,

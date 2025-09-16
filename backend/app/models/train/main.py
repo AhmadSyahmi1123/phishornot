@@ -1,100 +1,162 @@
-import pandas as pd
+# train_xgboost.py
+import os
+import json
 import joblib
-import torch
-import torch.nn as nn
-import torch.optim as optim
+import pandas as pd
+import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
-from torch.utils.data import TensorDataset, DataLoader
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score,
+    roc_auc_score, confusion_matrix, classification_report
+)
+from xgboost import XGBClassifier, DMatrix, cv
+from xgboost.callback import EarlyStopping
+import matplotlib.pyplot as plt
+import seaborn as sns
+sns.set(style="whitegrid")
 
-# Load the dataset
-df = pd.read_csv('backend/app/models/train/datasets/phishing_legit_dataset_with_features.csv')
+# -------------------------
+# CONFIG
+# -------------------------
+DATA_PATH = "backend/app/models/train/datasets/phishing_legit_dataset_with_features.csv"
+OUTPUT_DIR = "backend/app/models/train/output_xgb"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+RANDOM_STATE = 42
 
-# Drop unwanted columns
-X = df.drop(['url', 'label'], axis=1)
-y = df['label'].astype(int)
+# XGBoost training params (a good starting point)
+XGB_PARAMS = {
+    "n_estimators": 1000,           # large, but early stopping will cap it
+    "learning_rate": 0.05,
+    "max_depth": 6,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "gamma": 0,
+    "reg_alpha": 0.0,
+    "reg_lambda": 1.0,
+    "use_label_encoder": False,
+    "tree_method": "hist",          # fast; change to "gpu_hist" if using GPU
+    "random_state": RANDOM_STATE,
+    "n_jobs": -1,
+    "eval_metric": "auc"            # we'll use AUC for early stopping
+}
 
-# Train-test split
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+# -------------------------
+# Helper functions
+# -------------------------
+def load_data(path):
+    df = pd.read_csv(path)
+    if "label" not in df.columns:
+        raise ValueError("CSV must contain 'label' column.")
+    # Drop url column (we don't train on raw url)
+    X = df.drop(columns=[c for c in ["url"] if c in df.columns] + ["label"])
+    y = df["label"].astype(int)
+    return X, y
 
-# Scale the features
-scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
-X_test_scaled = scaler.transform(X_test)
+def save_json(obj, path):
+    with open(path, "w") as f:
+        json.dump(obj, f, indent=2)
 
-# Save the scaler
-joblib.dump(scaler, 'backend/app/models/scaler.pkl')
+# -------------------------
+# Main training flow
+# -------------------------
+def main():
+    print("Loading data...")
+    X, y = load_data(DATA_PATH)
+    feature_names = list(X.columns)
+    print(f"Loaded dataset with {X.shape[0]} rows and {len(feature_names)} features.")
 
-# Convert to PyTorch tensors
-X_train_tensor = torch.tensor(X_train_scaled, dtype=torch.float32)
-y_train_tensor = torch.tensor(y_train.values, dtype=torch.float32)
+    # split: train / temp  (train 70% / temp 30%)
+    X_train, X_temp, y_train, y_temp = train_test_split(
+        X, y, test_size=0.30, stratify=y, random_state=RANDOM_STATE
+    )
 
-X_test_tensor = torch.tensor(X_test_scaled, dtype=torch.float32)
-y_test_tensor = torch.tensor(y_test.values, dtype=torch.float32)
+    # split temp into val / test (15% val, 15% test overall)
+    X_val, X_test, y_val, y_test = train_test_split(
+        X_temp, y_temp, test_size=0.5, stratify=y_temp, random_state=RANDOM_STATE
+    )
 
-# Create DataLoaders
-train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+    print("Train/Val/Test sizes:", X_train.shape[0], X_val.shape[0], X_test.shape[0])
 
-# Define a simple feedforward neural network
-class Net(nn.Module):
-    def __init__(self, input_dim):
-        super(Net, self).__init__()
-        self.fc1 = nn.Linear(input_dim, 128)
-        self.relu1 = nn.ReLU()
-        self.fc2 = nn.Linear(128, 64)
-        self.relu2 = nn.ReLU()
-        self.output = nn.Linear(64, 1)
-        self.sigmoid = nn.Sigmoid()
+    # Convert to numpy (xgboost accepts pandas but keep as arrays)
+    X_train_np, X_val_np, X_test_np = X_train.values, X_val.values, X_test.values
 
-    def forward(self, x):
-        x = self.relu1(self.fc1(x))
-        x = self.relu2(self.fc2(x))
-        x = self.sigmoid(self.output(x))
-        return x
+    # Build model
+    print("Initializing XGBoost classifier...")
+    model = XGBClassifier(**XGB_PARAMS)
 
-# Initialize the model
-input_dim = X_train_tensor.shape[1]
-model = Net(input_dim)
+    # Save feature names before converting
+    feature_names = X_train.columns.tolist()
 
-# Move to GPU if available
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model.to(device)
-X_test_tensor = X_test_tensor.to(device)
-y_test_tensor = y_test_tensor.to(device)
+    model.fit(X_train_np, y_train.values)
 
-# Loss and optimizer
-criterion = nn.BCELoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+    # Save model and feature names
+    model_path = os.path.join(OUTPUT_DIR, "xgboost_url_phishing.joblib")
+    joblib.dump(model, model_path)
+    save_json(feature_names, os.path.join(OUTPUT_DIR, "feature_names.json"))
+    save_json(model.get_params(), os.path.join(OUTPUT_DIR, "xgb_params.json"))
+    print(f"Model saved to: {model_path}")
 
-# Train the model
-epochs = 100
-for epoch in range(epochs):
-    model.train()
-    total_loss = 0
-    for batch_X, batch_y in train_loader:
-        batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-        optimizer.zero_grad()
-        outputs = model(batch_X).squeeze()
-        loss = criterion(outputs, batch_y)
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item()
-    print(f"Epoch {epoch+1}/{epochs}, Loss: {total_loss:.4f}")
+    # Evaluate on test set
+    print("Evaluating on test set...")
+    y_pred = model.predict(X_test_np)
+    y_proba = model.predict_proba(X_test_np)[:, 1]
 
-# Evaluate
-model.eval()
-with torch.no_grad():
-    y_pred_prob = model(X_test_tensor).squeeze()
-    y_pred = (y_pred_prob > 0.5).int()
+    acc = accuracy_score(y_test, y_pred)
+    prec = precision_score(y_test, y_pred)
+    rec = recall_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred)
+    auc = roc_auc_score(y_test, y_proba)
+    cm = confusion_matrix(y_test, y_pred)
+    report = classification_report(y_test, y_pred, target_names=["Legit", "Phish"])
 
-accuracy = accuracy_score(y_test_tensor.cpu(), y_pred.cpu())
-print(f"\nAccuracy: {accuracy:.4f}")
-print("\nClassification Report:")
-print(classification_report(y_test_tensor.cpu(), y_pred.cpu()))
-print("\nConfusion Matrix:")
-print(confusion_matrix(y_test_tensor.cpu(), y_pred.cpu()))
+    print("\n--- Test Results ---")
+    print(f"Accuracy : {acc:.6f}")
+    print(f"Precision: {prec:.6f}")
+    print(f"Recall   : {rec:.6f}")
+    print(f"F1 Score : {f1:.6f}")
+    print(f"ROC AUC  : {auc:.6f}")
+    print("Confusion Matrix:\n", cm)
+    print("\nClassification Report:\n", report)
 
-# Save model
-torch.save(model.state_dict(), 'backend/app/models/model.pth')
+    # Save metrics
+    metrics = {
+        "accuracy": float(acc),
+        "precision": float(prec),
+        "recall": float(rec),
+        "f1": float(f1),
+        "roc_auc": float(auc),
+        "confusion_matrix": cm.tolist()
+    }
+    save_json(metrics, os.path.join(OUTPUT_DIR, "test_metrics.json"))
+
+    # manually assign feature names
+    booster = model.get_booster()
+    booster.feature_names = feature_names
+
+    # Feature importance (gain)
+    print("Calculating & plotting feature importances...")
+    importances = model.get_booster().get_score(importance_type="gain")
+    # Convert to dataframe for sorted plotting
+    imp_df = pd.DataFrame([
+        {"feature": f, "importance": importances.get(f, 0.0)}
+        for f in model.get_booster().feature_names
+    ])
+    imp_df = imp_df.sort_values("importance", ascending=False).reset_index(drop=True)
+    imp_df.to_csv(os.path.join(OUTPUT_DIR, "xgb_feature_importance.csv"), index=False)
+
+    # Plot top 30 features
+    top_n = min(30, len(imp_df))
+    plt.figure(figsize=(8, max(4, top_n * 0.25)))
+    sns.barplot(x="importance", y="feature", data=imp_df.head(top_n))
+    plt.title("XGBoost feature importance (gain) - top {}".format(top_n))
+    plt.tight_layout()
+    figpath = os.path.join(OUTPUT_DIR, "feature_importance_top.png")
+    plt.savefig(figpath, dpi=150)
+    plt.close()
+    print("Feature importance plot saved to:", figpath)
+
+    print("All done. Outputs in:", OUTPUT_DIR)
+
+
+if __name__ == "__main__":
+    main()
