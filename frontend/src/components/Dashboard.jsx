@@ -3,7 +3,7 @@ import { useMemo } from 'react'
 export default function Dashboard({ history }) {
   const stats = useMemo(() => {
     const total = history.length
-    const phishing = history.filter((h) => h.is_phishing).length
+    const phishing = history.filter((h) => h.is_phishing === 'phishing').length
     const legitimate = total - phishing
     const phishingPct = total ? ((phishing / total) * 100).toFixed(1) : 0
     const legitPct = total ? ((legitimate / total) * 100).toFixed(1) : 0
@@ -85,12 +85,12 @@ export default function Dashboard({ history }) {
                 <span className="text-gray-400 truncate flex-1 mr-2">{item.url}</span>
                 <span
                   className={`text-xs font-semibold px-2 py-0.5 rounded shrink-0 ${
-                    item.is_phishing
+                    item.is_phishing === 'phishing'
                       ? 'bg-red-900/50 text-red-400'
                       : 'bg-green-900/50 text-green-400'
                   }`}
                 >
-                  {item.is_phishing ? 'Phishing' : 'Legit'}
+                  {item.is_phishing === 'phishing' ? 'Phishing' : 'Legit'}
                 </span>
               </div>
             ))}

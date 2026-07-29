@@ -57,12 +57,12 @@ export default function HistoryPanel({ history, onSelect, onClear }) {
               <div className="flex items-center justify-between mb-1">
                 <span
                   className={`text-xs font-semibold px-2 py-0.5 rounded ${
-                    item.is_phishing
+                    item.is_phishing === 'phishing'
                       ? 'bg-red-900/50 text-red-400'
                       : 'bg-green-900/50 text-green-400'
                   }`}
                 >
-                  {item.is_phishing ? 'Phishing' : 'Legitimate'}
+                  {item.is_phishing === 'phishing' ? 'Phishing' : 'Legitimate'}
                 </span>
                 <span className="text-xs text-gray-500">
                   {(item.confidence * 100).toFixed(0)}%
