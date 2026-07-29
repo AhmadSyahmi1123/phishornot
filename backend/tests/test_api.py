@@ -103,3 +103,16 @@ def test_explain_empty_url():
 def test_explain_no_scheme():
     response = client.post("/explain", json={"url": "example.com"})
     assert response.status_code == 422
+
+def test_get_result_found():
+    pred = client.post("/predict", json={"url": "http://example.com"}).json()
+    rid = pred["result_id"]
+    response = client.get(f"/result/{rid}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["result_id"] == rid
+    assert data["url"] == "http://example.com"
+
+def test_get_result_not_found():
+    response = client.get("/result/nonexistent123")
+    assert response.status_code == 404

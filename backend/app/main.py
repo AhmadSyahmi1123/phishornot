@@ -36,6 +36,9 @@ FEATURE_NAMES_PATH = "backend/app/models/train/output_xgb/feature_names.json"
 with open(FEATURE_NAMES_PATH, "r") as f:
     FEATURE_NAMES = json.load(f)
 
+results_store: dict[str, dict] = {}
+RESULTS_TTL = 3600  # 1 hour
+
 REASON_TEMPLATES = {
     "has_suspicious_word": "The URL contains suspicious keywords like 'login' and 'verify'",
     "suspicious_tld": "The URL uses a suspicious top-level domain",
@@ -72,6 +75,12 @@ class URLRequest(BaseModel):
             raise ValueError("URL must have a valid domain format")
         return v
 
+def clean_expired_results():
+    now = time.time()
+    expired = [rid for rid, r in results_store.items() if now - r["_ts"] > RESULTS_TTL]
+    for rid in expired:
+        del results_store[rid]
+
 def make_result_id(url: str) -> str:
     raw = f"{url}:{time.time()}"
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
@@ -86,6 +95,15 @@ def get_features_for_url(url: str):
 def health():
     return {"status": "ok", "model": "xgboost"}
 
+@app.get("/result/{result_id}")
+def get_result(result_id: str):
+    clean_expired_results()
+    entry = results_store.get(result_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Result not found or expired")
+    result = {k: v for k, v in entry.items() if k != "_ts"}
+    return result
+
 @app.post("/predict")
 @limiter.limit("60/minute")
 def predict(request: Request, data: URLRequest):
@@ -94,14 +112,17 @@ def predict(request: Request, data: URLRequest):
         prob = model.predict_proba(X)[0][1]
         prediction = int(prob > 0.5)
         status = "phishing" if prediction == 1 else "legitimate"
+        result_id = make_result_id(cleaned)
 
-        return {
-            "result_id": make_result_id(cleaned),
+        result = {
+            "result_id": result_id,
             "url": data.url,
             "normalized_url": cleaned,
             "is_phishing": status,
             "confidence": float(prob),
         }
+        results_store[result_id] = {**result, "_ts": time.time()}
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -149,13 +170,16 @@ def explain(request: Request, data: URLRequest):
                 "contribution": float(contribution),
             }
 
-        return {
-            "result_id": make_result_id(cleaned),
+        result_id = make_result_id(cleaned)
+        result = {
+            "result_id": result_id,
             "url": data.url,
             "is_phishing": status,
             "confidence": float(prob),
             "top_reasons": top_reasons,
             "feature_breakdown": feature_breakdown,
         }
+        results_store[result_id] = {**result, "_ts": time.time()}
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

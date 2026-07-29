@@ -7,10 +7,6 @@ import Dashboard from './components/Dashboard'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
-function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
-}
-
 function loadHistory() {
   try {
     return JSON.parse(localStorage.getItem('phishornot_history') || '[]')
@@ -32,14 +28,25 @@ function CheckPage() {
   const [searchParams] = useSearchParams()
   const [history, setHistory] = useState(loadHistory)
 
-  const loadSharedResult = useCallback(() => {
+  const loadSharedResult = useCallback(async () => {
     const sharedId = searchParams.get('result')
     if (!sharedId) return
     const items = loadHistory()
-    const found = items.find((item) => item.id === sharedId)
+    let found = items.find((item) => item.server_id === sharedId || item.id === sharedId)
     if (found) {
       setResult(found)
-      setResultId(found.id)
+      setResultId(found.server_id || found.id)
+      return
+    }
+    try {
+      const res = await fetch(`${API_BASE}/result/${sharedId}`)
+      if (res.ok) {
+        const data = await res.json()
+        setResult(data)
+        setResultId(sharedId)
+      }
+    } catch {
+      // backend unreachable
     }
   }, [searchParams])
 
@@ -56,7 +63,6 @@ function CheckPage() {
     setResultId(null)
     setError(null)
 
-    const id = generateId()
     let predictData, explainData
 
     try {
@@ -86,18 +92,20 @@ function CheckPage() {
       // explain is optional
     }
 
+    const serverId = predictData.result_id
     const resultData = {
-      id,
+      id: serverId,
+      server_id: serverId,
       url: url.trim(),
       is_phishing: predictData.is_phishing,
       confidence: predictData.confidence,
       top_reasons: explainData?.top_reasons || predictData.top_reasons || [],
-      features: explainData?.features || predictData.features || null,
+      features: explainData?.feature_breakdown || predictData.features || null,
       timestamp: Date.now(),
     }
 
     setResult(resultData)
-    setResultId(id)
+    setResultId(serverId)
 
     const updatedHistory = [resultData, ...history]
     setHistory(updatedHistory)
