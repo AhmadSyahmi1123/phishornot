@@ -101,18 +101,21 @@ def normalize_url(url):
     return url.rstrip("/") if url.endswith("/") and url.count("/") <= 3 else url
 
 if __name__ == "__main__":
+    import json
+
+    model = joblib.load("backend/app/models/train/output_xgb/xgboost_url_phishing.joblib")
+    with open("backend/app/models/train/output_xgb/feature_names.json", "r") as f:
+        FEATURE_NAMES = json.load(f)
+
     while True:
         url = input("Enter URL: ")
-        
-        model = joblib.load("backend/app/models/model.pkl")
-        scaler = joblib.load("backend/app/models/scaler.pkl")
-        
+
         features = extract_features(normalize_url(url))
-        
-        dfeatures = np.array(list(features.values())).reshape(1, -1)
-        
-        prediction_prob = model.predict_proba(dfeatures)[0][1]
-        prediction = int(prediction_prob > 0.5)
-        status = "legitimate" if prediction == 1 else "phishing"
+
+        X = np.array([features[name] for name in FEATURE_NAMES]).reshape(1, -1)
+
+        prob = model.predict_proba(X)[0][1]
+        prediction = int(prob > 0.5)
+        status = "phishing" if prediction == 1 else "legitimate"
 
         print(status)

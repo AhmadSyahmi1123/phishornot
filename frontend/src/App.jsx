@@ -1,88 +1,217 @@
-import React, { useState } from 'react';
-import './App.css';
+import { useState, useEffect, useCallback } from 'react'
+import { Routes, Route, useSearchParams, Navigate } from 'react-router-dom'
+import NavBar from './components/NavBar'
+import ResultCard from './components/ResultCard'
+import HistoryPanel from './components/HistoryPanel'
+import Dashboard from './components/Dashboard'
 
-function Modal({ isOpen, onClose, children }) {
-  if (!isOpen) return null;
+const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
-  return (
-    <div className="modal-overlay">
-      <div className="modal">
-        <button className="close-button" onClick={onClose}>×</button>
-        {children}
-      </div>
-    </div>
-  );
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 }
 
-function App() {
-  const [url, setUrl] = useState('');
-  const [result, setResult] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [showModal, setShowModal] = useState(false);
+function loadHistory() {
+  try {
+    return JSON.parse(localStorage.getItem('phishornot_history') || '[]')
+  } catch {
+    return []
+  }
+}
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setResult(null);
-    setShowModal(true);
+function saveHistory(history) {
+  localStorage.setItem('phishornot_history', JSON.stringify(history))
+}
+
+function CheckPage() {
+  const [url, setUrl] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState(null)
+  const [resultId, setResultId] = useState(null)
+  const [error, setError] = useState(null)
+  const [searchParams] = useSearchParams()
+  const [history, setHistory] = useState(loadHistory)
+
+  const loadSharedResult = useCallback(() => {
+    const sharedId = searchParams.get('result')
+    if (!sharedId) return
+    const items = loadHistory()
+    const found = items.find((item) => item.id === sharedId)
+    if (found) {
+      setResult(found)
+      setResultId(found.id)
+    }
+  }, [searchParams])
+
+  useEffect(() => {
+    loadSharedResult()
+  }, [loadSharedResult])
+
+  const handleCheck = async (e) => {
+    e.preventDefault()
+    if (!url.trim()) return
+
+    setLoading(true)
+    setResult(null)
+    setResultId(null)
+    setError(null)
+
+    const id = generateId()
+    let predictData, explainData
 
     try {
-      const response = await fetch('https://phishornot.onrender.com/predict', {
+      const predictRes = await fetch(`${API_BASE}/predict`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      });
-
-      const data = await response.json();
-      setResult(data);
-    } catch (error) {
-      setResult({ error: 'Error connecting to backend.' });
-    } finally {
-      setLoading(false);
+        body: JSON.stringify({ url: url.trim() }),
+      })
+      if (!predictRes.ok) throw new Error(`Predict failed: ${predictRes.status}`)
+      predictData = await predictRes.json()
+    } catch (err) {
+      setError(err.message)
+      setLoading(false)
+      return
     }
-  };
 
-  const closeModal = () => {
-    setShowModal(false);
-    setResult(null);
-    setUrl('');
-  };
+    try {
+      const explainRes = await fetch(`${API_BASE}/explain`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url.trim() }),
+      })
+      if (explainRes.ok) {
+        explainData = await explainRes.json()
+      }
+    } catch {
+      // explain is optional
+    }
+
+    const resultData = {
+      id,
+      url: url.trim(),
+      is_phishing: predictData.is_phishing,
+      confidence: predictData.confidence,
+      top_reasons: explainData?.top_reasons || predictData.top_reasons || [],
+      features: explainData?.features || predictData.features || null,
+      timestamp: Date.now(),
+    }
+
+    setResult(resultData)
+    setResultId(id)
+
+    const updatedHistory = [resultData, ...history]
+    setHistory(updatedHistory)
+    saveHistory(updatedHistory)
+    setLoading(false)
+  }
 
   return (
-    <div className="App">
-      <h1>phishornot?</h1>
-      <form onSubmit={handleSubmit}>
+    <div className="space-y-6">
+      {/* Input Form */}
+      <form onSubmit={handleCheck} className="flex gap-3">
         <input
           type="text"
-          placeholder="Enter a URL..."
+          placeholder="Enter a URL to check..."
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          required
+          className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-5 py-3.5 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-gray-600 transition-colors"
         />
-        <button type="submit" disabled={loading}>
-          Check URL
+        <button
+          type="submit"
+          disabled={loading || !url.trim()}
+          className="px-6 py-3.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-xl font-medium transition-colors"
+        >
+          {loading ? (
+            <span className="flex items-center gap-2">
+              <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Checking...
+            </span>
+          ) : (
+            'Check URL'
+          )}
         </button>
       </form>
 
-      <Modal isOpen={showModal} onClose={closeModal}>
-        {loading ? (
-          <div className="spinner"></div>
-        ) : result ? (
-          <div className="result">
-            {result.error ? (
-              <p className="error">{result.error}</p>
-            ) : (
-              <>
-                <p><strong>URL:</strong> {result.url}</p>
-                <p><strong>Status:</strong> {result.is_phishing}</p>
-                <p><strong>Confidence:</strong> {(result.confidence * 100).toFixed(2)}%</p>
-              </>
-            )}
-          </div>
-        ) : null}
-      </Modal>
+      {/* Error */}
+      {error && (
+        <div className="bg-red-900/30 border border-red-800 rounded-xl p-4 text-red-400 text-sm">
+          {error}
+        </div>
+      )}
+
+      {/* Loading */}
+      {loading && (
+        <div className="flex flex-col items-center py-12 text-gray-500">
+          <svg className="animate-spin w-8 h-8 mb-3" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <span className="text-sm">Analyzing URL...</span>
+        </div>
+      )}
+
+      {/* Result */}
+      {result && !loading && (
+        <ResultCard result={result} resultId={resultId} />
+      )}
+
+      {!result && !loading && !error && (
+        <div className="text-center py-16 text-gray-600">
+          <p className="text-lg">Enter a URL above to check if it's phishing</p>
+          <p className="text-sm mt-2">Results are saved to your browsing history</p>
+        </div>
+      )}
     </div>
-  );
+  )
 }
 
-export default App;
+export default function App() {
+  const [history, setHistory] = useState(loadHistory)
+
+  useEffect(() => {
+    const handler = () => setHistory(loadHistory())
+    window.addEventListener('storage', handler)
+    return () => window.removeEventListener('storage', handler)
+  }, [])
+
+  const clearHistory = () => {
+    setHistory([])
+    saveHistory([])
+  }
+
+  const selectHistoryItem = (id) => {
+    const item = history.find((h) => h.id === id)
+    if (item) {
+      window.location.href = `/?result=${id}`
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-900 text-gray-100">
+      <NavBar />
+      <main className="max-w-3xl mx-auto px-4 py-8">
+        <Routes>
+          <Route path="/" element={<CheckPage />} />
+          <Route
+            path="/history"
+            element={
+              <HistoryPanel
+                history={history}
+                onSelect={selectHistoryItem}
+                onClear={clearHistory}
+              />
+            }
+          />
+          <Route
+            path="/dashboard"
+            element={<Dashboard history={history} />}
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </main>
+    </div>
+  )
+}

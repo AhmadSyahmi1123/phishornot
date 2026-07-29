@@ -9,3 +9,7 @@ aiofiles
 python-whois
 dnspython
 tldextract
+shap
+slowapi
+httpx
+pytest
