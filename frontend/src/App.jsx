@@ -6,6 +6,7 @@ import HistoryPanel from './components/HistoryPanel'
 import Dashboard from './components/Dashboard'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
+console.log('API_BASE:', API_BASE)
 
 function loadHistory() {
   try {
@@ -19,14 +20,13 @@ function saveHistory(history) {
   localStorage.setItem('phishornot_history', JSON.stringify(history))
 }
 
-function CheckPage() {
+function CheckPage({ history, onNewResult }) {
   const [url, setUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [resultId, setResultId] = useState(null)
   const [error, setError] = useState(null)
   const [searchParams] = useSearchParams()
-  const [history, setHistory] = useState(loadHistory)
 
   const loadSharedResult = useCallback(async () => {
     const sharedId = searchParams.get('result')
@@ -106,10 +106,7 @@ function CheckPage() {
 
     setResult(resultData)
     setResultId(serverId)
-
-    const updatedHistory = [resultData, ...history]
-    setHistory(updatedHistory)
-    saveHistory(updatedHistory)
+    onNewResult(resultData)
     setLoading(false)
   }
 
@@ -179,11 +176,11 @@ function CheckPage() {
 export default function App() {
   const [history, setHistory] = useState(loadHistory)
 
-  useEffect(() => {
-    const handler = () => setHistory(loadHistory())
-    window.addEventListener('storage', handler)
-    return () => window.removeEventListener('storage', handler)
-  }, [])
+  const addResult = (resultData) => {
+    const updated = [resultData, ...history]
+    setHistory(updated)
+    saveHistory(updated)
+  }
 
   const clearHistory = () => {
     setHistory([])
@@ -202,7 +199,7 @@ export default function App() {
       <NavBar />
       <main className="max-w-3xl mx-auto px-4 py-8">
         <Routes>
-          <Route path="/" element={<CheckPage />} />
+          <Route path="/" element={<CheckPage history={history} onNewResult={addResult} />} />
           <Route
             path="/history"
             element={
