@@ -6,9 +6,20 @@ export default function ResultCard({ result, resultId }) {
 
   if (!result) return null
 
-  const isPhishing = result.is_phishing
-  const confidence = result.confidence
+  const isPhishing = result.is_phishing === 'phishing' || result.is_phishing === true
+  const confidence = result.confidence ?? 0
   const confidencePct = (confidence * 100).toFixed(1)
+  const barWidth = Math.max(1, confidence * 100)
+
+  function displayValue(v) {
+    if (v === null || v === undefined) return '-'
+    if (typeof v === 'number') return v.toFixed(4)
+    if (typeof v === 'object') {
+      if ('value' in v) return String(v.value)
+      return JSON.stringify(v)
+    }
+    return String(v)
+  }
 
   return (
     <div className="bg-gray-800 rounded-xl border border-gray-700 p-6 space-y-4">
@@ -36,19 +47,24 @@ export default function ResultCard({ result, resultId }) {
         <p className="text-sm text-gray-200 break-all font-mono">{result.url}</p>
       </div>
 
-      {/* Confidence Bar */}
+        {/* Confidence Bar */}
       <div>
         <div className="flex justify-between text-xs text-gray-400 mb-1">
           <span>Legitimate</span>
-          <span>Phishing</span>
+          <span className={isPhishing ? 'text-red-400 font-semibold' : ''}>{confidencePct}%</span>
         </div>
-        <div className="w-full bg-gray-700 rounded-full h-2.5 overflow-hidden">
+        <div className="w-full bg-gray-700 rounded-full h-3 overflow-hidden relative">
           <div
             className={`h-full rounded-full transition-all duration-500 ${
-              isPhishing ? 'bg-red-500 ml-auto' : 'bg-green-500'
+              isPhishing ? 'bg-red-500' : 'bg-green-500'
             }`}
-            style={{ width: `${confidencePct}%` }}
+            style={{ width: `${barWidth}%` }}
           />
+        </div>
+        <div className="flex justify-between text-xs text-gray-500 mt-1">
+          <span>0%</span>
+          <span>50%</span>
+          <span>100%</span>
         </div>
       </div>
 
@@ -99,7 +115,7 @@ export default function ResultCard({ result, resultId }) {
                     <tr key={key} className="border-b border-gray-700/50">
                       <td className="py-1.5 pr-4 text-gray-400 font-mono">{key}</td>
                       <td className="py-1.5 text-right text-gray-300 font-mono">
-                        {typeof value === 'number' ? value.toFixed(4) : String(value)}
+                        {displayValue(value)}
                       </td>
                     </tr>
                   ))}
