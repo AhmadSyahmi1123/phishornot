@@ -60,7 +60,7 @@ export default function ResultCard({ result, resultId }) {
             {result.top_reasons.map((reason, i) => (
               <li key={i} className="text-sm text-gray-400 flex items-start gap-2">
                 <span className="text-yellow-500 mt-0.5">•</span>
-                {reason}
+                {typeof reason === 'string' ? reason : reason.reason}
               </li>
             ))}
           </ul>
