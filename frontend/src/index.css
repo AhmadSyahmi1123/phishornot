@@ -13,6 +13,9 @@
   --color-destructive-muted: rgba(239, 68, 68, 0.15);
   --color-verified: #22C55E;
   --color-warning: #F59E0B;
+
+  --shadow-sm: 0 1px 3px 0 rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.4);
 }
 
 @layer base {
