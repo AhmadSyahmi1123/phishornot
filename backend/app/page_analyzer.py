@@ -83,7 +83,7 @@ def form_phishing_score(soup, url_domain: str) -> float | None:
         action = form.get("action", "")
         if action:
             parsed = urlparse(action)
-            action_domain = parsed.netloc
+            action_domain = parsed.hostname
             if action_domain and action_domain != url_domain:
                 return 1.0
 
@@ -99,7 +99,7 @@ def links_phishing_score(soup, url_domain: str) -> float | None:
     for link in links:
         href = link["href"]
         parsed = urlparse(href)
-        link_domain = parsed.netloc
+        link_domain = parsed.hostname
         if link_domain:
             domain_counts[link_domain] = domain_counts.get(link_domain, 0) + 1
 
