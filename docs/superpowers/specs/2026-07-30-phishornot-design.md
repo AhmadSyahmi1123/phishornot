@@ -2,7 +2,7 @@
 
 ## Overview
 
-Complete visual revamp of the PhishOrNot phishing detection web app. Dark, technical, and approachable — targeting security-conscious general consumers. Built with React 19 + Tailwind CSS v4 + React Router v7.
+Complete visual revamp of the PhishOrNot phishing detection web app with a **Bento Grid** design — dark, technical, and approachable. Full-width responsive layout with modular cards, subtle shadows, and staggered animations. Built with React 19 + Tailwind CSS v4 + React Router v7.
 
 ## Design Tokens
 
@@ -38,11 +38,12 @@ Using Tailwind v4 default scale (`0.25rem` increments). Key tiers:
 
 ### Effects
 
-- **Flat design** — no shadows or gradients
-- **Hover states:** opacity shift (`hover:opacity-90`) or color shift with 150-200ms transition
+- **Bento UI** — subtle `shadow-sm` (`0 1px 3px rgba(0,0,0,0.3)`), `rounded-2xl` (16px) on cards
+- **Card hover:** `hover:scale-[1.02]` with `hover:shadow-md` for lift effect
+- **Button hover:** opacity shift (`hover:opacity-90`) with 150-200ms transition
 - **Active states:** subtle scale (`active:scale-[0.98]`) for buttons
 - **Focus states:** ring-2 with accent color for keyboard navigation
-- **Borders:** `border` on cards/surfaces, not shadows
+- **Borders:** `border border-border` on cards for definition
 
 ## Page Architecture
 
@@ -57,12 +58,12 @@ Using Tailwind v4 default scale (`0.25rem` increments). Key tiers:
 
 ### 2. Check Page (Home `/`)
 
-- Hero-style layout: centered, large typography
-- Tagline: oversized heading + short descriptive text
+- **Full-width layout** (no max-width constraint, responsive px-6 padding)
+- Hero section: centered heading + tagline + input (max-w-2lx)
 - URL input: large, centered, with accent-colored CTA button
-- Loading state: subtle spinner + "Analyzing..." text with staggered dots animation
-- Result card: appears with fade-in + slide-up animation (200ms ease)
-- Empty state: descriptive placeholder text, centered
+- Loading state: subtle spinner + "Analyzing..." text
+- Result card: full-width bento tile, appears with fade-in + slide-up animation (200ms ease)
+- Below result: small bento strip with quick stats / safety tips
 
 ### 3. ResultCard
 
@@ -78,19 +79,20 @@ Using Tailwind v4 default scale (`0.25rem` increments). Key tiers:
 
 - Search input with magnifying glass icon
 - "Clear All" button (destructive style)
-- List of history items: verdict badge, URL (truncated), confidence %, timestamp
+- History items in **2-column bento grid** (responsive → 1-col on mobile)
+- Each item: verdict badge, URL (truncated), confidence %, timestamp
 - Each item clickable → navigates to Check page with that result loaded
 - Empty state: "No checks yet" with appropriate icon
 - Filter animation: items stagger in on load
 
 ### 5. Dashboard (`/dashboard`)
 
-- Three stat cards: Total Checks, Phishing, Legitimate — in a responsive grid
-- Ratio bar: split red/green bar with percentage labels
-- Recent Checks list (last 10)
-- Most Checked Domains list (top 10)
+- **Full-width bento grid layout** (no max-width constraint, fills viewport with px-6 padding)
+- Three stat cards: Total Checks, Phishing, Legitimate — in a responsive 3-column grid
+- **Ratio bar:** spans full width, larger size (2x1 bento tile)
+- **Recent Checks** and **Top Domains** in side-by-side 2-column grid (each 1x1 tile)
+- Cards use `rounded-2xl`, `shadow-sm`, `hover:scale-[1.02]`, stagger entrance animation
 - Empty state when no history exists
-- Cards with consistent surface styling, border-based separation
 
 ## Components
 
@@ -103,11 +105,13 @@ Using Tailwind v4 default scale (`0.25rem` increments). Key tiers:
 | Destructive | Red border, red text, hover:bg-red-900/20 |
 | Ghost | No border, text muted, hover:text-white |
 
-### Cards
+### Cards (Bento Tiles)
 
-- Surface bg (`#1E293B`), border (`#475569`), rounded-xl
+- Surface bg (`#1E293B`), border (`#475569`), **rounded-2xl** (16px)
+- **Shadow:** `shadow-sm` (`0 1px 3px rgba(0,0,0,0.3)`)
+- **Hover:** `hover:scale-[1.02] hover:shadow-md` with 200ms ease transition
 - Padding: p-5 or p-6 depending on content density
-- No hover elevation change (flat design)
+- Stagger entrance via `motion-safe:animate-[fadeInSlideUp_300ms_ease]`
 
 ### Inputs
 
@@ -140,6 +144,8 @@ Using `@phosphor-icons/react` (regular weight, 20px default):
 
 - **Page transitions:** 150-200ms ease, no GSAP (keep it lightweight)
 - **Result appearance:** fade-in + translate-y(8px) → 0, 200ms ease
+- **Bento grid stagger:** items fade-in + translate-y with 60ms staggered delay per item
+- **Card hover:** `hover:scale-[1.02]` with 200ms ease
 - **Loading spinner:** CSS `animate-spin`
 - **Button press:** `active:scale-[0.98]`
 - **Accordion expand:** rotate chevron 90°, max-height transition
@@ -147,15 +153,15 @@ Using `@phosphor-icons/react` (regular weight, 20px default):
 
 ## Responsive Breakpoints
 
-- Mobile: 375px+ (single column, icon-only nav)
-- Tablet: 768px+ (two-column dashboard)
-- Desktop: 1024px+ (max-w-3xl content width)
-- Wide: 1440px+
+- Mobile: 375px+ (single column, icon-only nav, px-4)
+- Tablet: 768px+ (2-column bento grid, px-6)
+- Desktop: 1024px+ (3-column stats, full bento layout, px-8)
+- Wide: 1440px+ (px-12, max card sizes capped)
 
 ## Anti-Patterns (Do Not) — from design system
 
 - ❌ Emojis as icons (use Phosphor SVG)
-- ❌ Layout-shifting hover transforms
+- ❌ Narrow content on wide screens (full-width bento layout instead)
 - ❌ Low contrast text (< 4.5:1)
 - ❌ Instant state changes without transitions
 - ❌ Missing `cursor-pointer` on clickable elements

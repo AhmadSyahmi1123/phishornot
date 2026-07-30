@@ -7,9 +7,9 @@
 ---
 
 **Project:** PhishOrNot
-**Generated:** 2026-07-30 23:53:49
-**Category:** Cybersecurity Platform
-**Design Dials:** Variance 3/10 (Centered / Minimal) | Motion 4/10 (Standard) | Density 5/10 (Standard)
+**Generated:** 2026-07-31 00:26:55
+**Category:** Creator Economy Platform
+**Design Dials:** Variance 7/10 (Balanced / Modern) | Motion 5/10 (Standard) | Density 6/10 (Standard)
 
 ---
 
@@ -46,7 +46,7 @@
 
 ### Spacing Variables
 
-*Density: 5/10 — Standard*
+*Density: 6/10 — Standard*
 
 | Token | Value | Usage |
 |-------|-------|-------|
@@ -161,21 +161,21 @@
 
 ## Style Guidelines
 
-**Style:** Exaggerated Minimalism
+**Style:** Modern Dark (Cinema Mobile)
 
-**Keywords:** Bold minimalism, oversized typography, high contrast, negative space, loud minimal, statement design
+**Keywords:** dark mode, cinematic, ambient light, glassmorphism, deep black, indigo, glow, blur, atmospheric, reanimated, haptic, premium, layered, frosted glass, linear gradient
 
-**Best For:** Fashion, architecture, portfolios, agency landing pages, luxury brands, editorial
+**Best For:** Developer tools, pro productivity apps, fintech/trading dashboards, media/streaming platforms, AI tool interfaces, high-end gaming companion apps
 
-**Key Effects:** font-size: clamp(3rem 10vw 12rem), font-weight: 900, letter-spacing: -0.05em, massive whitespace
+**Key Effects:** Expo.out Bezier(0.16,1,0.3,1) easing; spring modals (damping:20 stiffness:90); haptic-linked press (Impact Light/Medium); animated ambient light blobs (Reanimated translateX/Y slow oscillation); BlurView glassmorphism headers/nav (intensity 20); scale press 0.97 → 1.0; avoid pure #000000 (OLED smear)
 
 ### Page Pattern
 
-**Pattern Name:** Trust & Authority + Conversion
+**Pattern Name:** Bento Grid Showcase
 
-- **Conversion Strategy:** Security badges. Case studies. Transparent pricing. Low-friction form.
-- **CTA Placement:** Contact Sales / Get Quote (primary) + Nav
-- **Section Order:** 1. Hero (mission/credibility), 2. Proof (logos, certs, stats), 3. Solution overview, 4. Clear CTA path
+- **Conversion Strategy:** Scannable value props. High information density without clutter. Mobile stack.
+- **CTA Placement:** Floating Action Button or Bottom of Grid
+- **Section Order:** 1. Hero, 2. Bento Grid (Key Features), 3. Detail Cards, 4. Tech Specs, 5. CTA
 
 ---
 
@@ -197,8 +197,8 @@ gsap.from('.grid-item', { opacity: 0, scale: 0.92, y: 16, duration: 0.4, stagger
 
 ## Anti-Patterns (Do NOT Use)
 
-- ❌ Light mode
-- ❌ Poor data viz
+- ❌ Generic layout
+- ❌ Hidden earnings
 
 ### Additional Forbidden Patterns
 
