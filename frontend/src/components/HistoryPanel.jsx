@@ -21,7 +21,7 @@ export default function HistoryPanel({ history, onSelect, onClear }) {
             placeholder="Search URLs..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-surface border border-border rounded-lg pl-10 pr-4 py-2 text-sm text-[#F8FAFC] placeholder-text-muted focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/30 motion-safe:transition-all duration-150"
+            className="w-full bg-surface border border-border rounded-2xl pl-10 pr-4 py-2 text-sm text-[#F8FAFC] placeholder-text-muted focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/30 motion-safe:transition-all duration-150"
           />
         </div>
         {history.length > 0 && (
@@ -39,12 +39,12 @@ export default function HistoryPanel({ history, onSelect, onClear }) {
           {history.length === 0 ? 'No checks yet. Check a URL to see history.' : 'No matching URLs found.'}
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {filtered.map((item) => (
             <button
               key={item.id}
               onClick={() => onSelect(item.id)}
-              className="w-full text-left bg-surface border border-border rounded-lg p-4 hover:border-accent/40 motion-safe:transition-all duration-150 cursor-pointer active:scale-[0.99] focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:outline-none"
+              className="w-full text-left bg-surface border border-border rounded-2xl p-4 shadow-sm hover:scale-[1.02] hover:shadow-md hover:border-accent/40 motion-safe:transition-all duration-200 cursor-pointer active:scale-[0.99] focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:outline-none"
             >
               <div className="flex items-center justify-between mb-1">
                 <span
