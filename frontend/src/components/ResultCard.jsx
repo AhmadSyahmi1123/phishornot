@@ -23,7 +23,7 @@ export default function ResultCard({ result, resultId }) {
   }
 
   return (
-    <div className={`bg-surface border rounded-xl p-6 space-y-5 ${
+    <div className={`bg-surface border rounded-2xl p-6 space-y-5 shadow-sm hover:scale-[1.02] hover:shadow-md motion-safe:transition-all duration-200 ${
       isPhishing ? 'border-destructive/40' : 'border-accent/40'
     }`}>
       {/* Status Badge */}
