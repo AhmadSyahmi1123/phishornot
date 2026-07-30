@@ -63,21 +63,7 @@ function CheckPage({ history, onNewResult }) {
     setResultId(null)
     setError(null)
 
-    let predictData, explainData
-
-    try {
-      const predictRes = await fetch(`${API_BASE}/predict`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim() }),
-      })
-      if (!predictRes.ok) throw new Error(`Predict failed: ${predictRes.status}`)
-      predictData = await predictRes.json()
-    } catch (err) {
-      setError(err.message)
-      setLoading(false)
-      return
-    }
+    let explainData, predictData
 
     try {
       const explainRes = await fetch(`${API_BASE}/explain`, {
@@ -87,20 +73,39 @@ function CheckPage({ history, onNewResult }) {
       })
       if (explainRes.ok) {
         explainData = await explainRes.json()
+      } else {
+        throw new Error(`Explain failed: ${explainRes.status}`)
       }
     } catch {
-      // explain is optional
+      try {
+        const predictRes = await fetch(`${API_BASE}/predict`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: url.trim() }),
+        })
+        if (!predictRes.ok) throw new Error(`Predict failed: ${predictRes.status}`)
+        predictData = await predictRes.json()
+      } catch (err) {
+        setError(err.message)
+        setLoading(false)
+        return
+      }
     }
 
-    const serverId = predictData.result_id
+    const data = explainData || predictData
+    const serverId = data.result_id
     const resultData = {
       id: serverId,
       server_id: serverId,
       url: url.trim(),
-      is_phishing: predictData.is_phishing,
-      confidence: predictData.confidence,
-      top_reasons: explainData?.top_reasons || predictData.top_reasons || [],
-      features: explainData?.feature_breakdown || predictData.features || null,
+      tier: data.tier,
+      is_phishing: data.is_phishing,
+      confidence: data.confidence,
+      xgb_confidence: data.xgb_confidence ?? data.confidence,
+      content_confidence: data.content_confidence,
+      fetched_page: data.fetched_page ?? false,
+      top_reasons: data.top_reasons || [],
+      features: data.feature_breakdown || data.features || null,
       timestamp: Date.now(),
     }
 

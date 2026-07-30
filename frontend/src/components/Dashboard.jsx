@@ -3,10 +3,12 @@ import { useMemo } from 'react'
 export default function Dashboard({ history }) {
   const stats = useMemo(() => {
     const total = history.length
-    const phishing = history.filter((h) => h.is_phishing === 'phishing').length
-    const legitimate = total - phishing
+    const phishing = history.filter((h) => h.tier === 'phishing').length
+    const unsure = history.filter((h) => h.tier === 'unsure').length
+    const legitimate = total - phishing - unsure
     const phishingPct = total ? ((phishing / total) * 100).toFixed(1) : 0
     const legitPct = total ? ((legitimate / total) * 100).toFixed(1) : 0
+    const unsurePct = total ? ((unsure / total) * 100).toFixed(1) : 0
 
     const domainCounts = {}
     history.forEach((h) => {
@@ -23,7 +25,7 @@ export default function Dashboard({ history }) {
 
     const recent = [...history].reverse().slice(0, 10)
 
-    return { total, phishing, legitimate, phishingPct, legitPct, topDomains, recent }
+    return { total, phishing, unsure, legitimate, phishingPct, legitPct, unsurePct, topDomains, recent }
   }, [history])
 
   if (stats.total === 0) {
@@ -37,7 +39,7 @@ export default function Dashboard({ history }) {
   return (
     <div className="space-y-5">
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <div className="bg-surface border border-border rounded-2xl p-5 shadow-sm hover:scale-[1.02] hover:shadow-md motion-safe:transition-all duration-200">
           <p className="text-xs text-text-muted uppercase tracking-wider">Total Checks</p>
           <p className="text-3xl font-bold text-[#F8FAFC] mt-1">{stats.total}</p>
@@ -49,6 +51,10 @@ export default function Dashboard({ history }) {
         <div className="bg-surface border border-border rounded-2xl p-5 shadow-sm hover:scale-[1.02] hover:shadow-md motion-safe:transition-all duration-200">
           <p className="text-xs text-text-muted uppercase tracking-wider">Legitimate</p>
           <p className="text-3xl font-bold text-accent mt-1">{stats.legitimate}</p>
+        </div>
+        <div className="bg-surface border border-border rounded-2xl p-5 shadow-sm hover:scale-[1.02] hover:shadow-md motion-safe:transition-all duration-200">
+          <p className="text-xs text-text-muted uppercase tracking-wider">Unsure</p>
+          <p className="text-3xl font-bold text-[#F59E0B] mt-1">{stats.unsure}</p>
         </div>
       </div>
 
@@ -85,12 +91,14 @@ export default function Dashboard({ history }) {
                 <span className="text-text-muted truncate flex-1 mr-2">{item.url}</span>
                 <span
                   className={`text-xs font-semibold px-2 py-0.5 rounded shrink-0 ${
-                    item.is_phishing === 'phishing'
+                    item.tier === 'phishing'
                       ? 'bg-destructive-muted text-destructive'
-                      : 'bg-accent-muted text-accent'
+                      : item.tier === 'unsure'
+                        ? 'bg-[#F59E0B]/10 text-[#F59E0B]'
+                        : 'bg-accent-muted text-accent'
                   }`}
                 >
-                  {item.is_phishing === 'phishing' ? 'Phishing' : 'Legit'}
+                  {item.tier === 'phishing' ? 'Phishing' : item.tier === 'unsure' ? 'Unsure' : 'Safe'}
                 </span>
               </div>
             ))}
