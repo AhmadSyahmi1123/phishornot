@@ -222,7 +222,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0F172A] text-[#F8FAFC]">
       <NavBar />
-      <main className="max-w-3xl mx-auto px-4 py-8">
+      <main className="w-full px-4 sm:px-6 lg:px-8 py-8 max-w-7xl mx-auto">
         <Routes>
           <Route path="/" element={<CheckPage history={history} onNewResult={addResult} />} />
           <Route
