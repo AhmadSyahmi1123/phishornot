@@ -89,7 +89,10 @@ def test_prediction_shape():
         feature_names = json.load(f)
 
     features = extract_features("http://example.com")
-    X = np.array([features[name] for name in feature_names if name in features]).reshape(1, -1)
+    X = np.zeros((1, len(feature_names)))
+    for i, name in enumerate(feature_names):
+        if name in features:
+            X[0, i] = features[name]
     prob = model.predict_proba(X)[0]
     assert prob.shape == (2,)
     assert 0 <= prob[0] <= 1

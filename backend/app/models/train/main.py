@@ -58,8 +58,9 @@ def load_data():
                 url_col = col
                 break
         if url_col is not None:
-            urls.extend(df[url_col].dropna().astype(str).tolist())
-            labels.extend([1] * len(df))
+            phish_urls = df[url_col].dropna().astype(str).tolist()
+            urls.extend(phish_urls)
+            labels.extend([1] * len(phish_urls))
 
     if openphish_path.exists():
         with open(openphish_path, "r") as f:
