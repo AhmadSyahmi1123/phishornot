@@ -5,9 +5,12 @@ import httpx
 import tldextract
 from bs4 import BeautifulSoup
 
-TIMEOUT = 5
-MAX_SIZE = 500 * 1024
-MAX_REDIRECTS = 3
+from backend.app.config import (
+    CONTENT_WEIGHTS,
+    PAGE_FETCH_TIMEOUT,
+    PAGE_MAX_SIZE,
+    PAGE_MAX_REDIRECTS,
+)
 
 DISTRACTOR_WORDS = {
     "secure", "login", "verify", "account", "update", "password",
@@ -17,13 +20,6 @@ DISTRACTOR_WORDS = {
     "limited", "restricted", "invoice", "bill", "payment", "refund",
     "claim", "prize", "winner", "free", "bonus", "reward", "coupon",
     "promo", "offer", "discount",
-}
-
-CONTENT_WEIGHTS = {
-    "brand": 0.4,
-    "form": 0.25,
-    "links": 0.2,
-    "structure": 0.15,
 }
 
 
@@ -197,9 +193,9 @@ def compute_content_score(soup, url_domain: str, raw_text: str) -> dict:
 def fetch_page(url: str) -> dict:
     try:
         with httpx.Client(
-            timeout=TIMEOUT,
+            timeout=PAGE_FETCH_TIMEOUT,
             follow_redirects=True,
-            max_redirects=MAX_REDIRECTS,
+            max_redirects=PAGE_MAX_REDIRECTS,
         ) as client:
             response = client.get(
                 url,
@@ -216,7 +212,7 @@ def fetch_page(url: str) -> dict:
             if "text/html" not in content_type and "text/plain" not in content_type:
                 return {"html": None, "soup": None, "domain": None, "fetched": False}
 
-            html = response.text[:MAX_SIZE]
+            html = response.text[:PAGE_MAX_SIZE]
             soup = BeautifulSoup(html, "html.parser")
             domain = urlparse(str(response.url)).netloc
 

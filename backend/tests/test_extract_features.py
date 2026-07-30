@@ -52,6 +52,8 @@ def test_url_with_path_and_query():
     assert features["having_query"] == 1
     assert features["number_of_slash_in_url"] >= 4
     assert features["number_of_equal_in_url"] >= 2
+    assert features["query_param_count"] >= 2
+    assert features["path_depth"] >= 3
 
 
 def test_url_with_digits():
@@ -90,13 +92,13 @@ def test_entropy_values():
 
 
 def test_homograph_unicode_url():
-    features = extract_features("http://exаmple.com")  # Cyrillic 'а'
+    features = extract_features("http://exаmple.com")
     assert features["has_unicode"] == 1
     assert features["has_confusable"] == 1
 
 
 def test_homograph_mixed_script():
-    features = extract_features("http://exаmple.com")  # Cyrillic 'а' in domain
+    features = extract_features("http://exаmple.com")
     assert features["has_mixed_script"] == 1
 
 
@@ -105,6 +107,34 @@ def test_pure_ascii_url():
     assert features["has_unicode"] == 0
     assert features["has_mixed_script"] == 0
     assert features["has_confusable"] == 0
+
+
+def test_ip_address_url():
+    features = extract_features("http://192.168.1.1/login")
+    assert features["having_ip"] == 1
+    assert features["number_of_dots_in_url"] == 3
+
+
+def test_non_ip_url():
+    features = extract_features("http://example.com")
+    assert features["having_ip"] == 0
+
+
+def test_digit_ratio():
+    features = extract_features("http://ex4mpl3.c0m")
+    assert features["digit_ratio"] > 0
+
+
+def test_special_char_ratio():
+    features = extract_features("http://example.com/path?x=1&y=2")
+    assert features["special_char_ratio"] > 0
+
+
+def test_tld_length():
+    features = extract_features("http://example.com")
+    assert features["tld_length"] == 3
+    features2 = extract_features("http://example.co.uk")
+    assert features2["tld_length"] > 3
 
 
 def test_all_feature_keys_present():
@@ -129,10 +159,12 @@ def test_all_feature_keys_present():
         "number_of_special_characters_in_subdomain",
         "having_digits_in_subdomain", "number_of_digits_in_subdomain",
         "having_repeated_digits_in_subdomain", "having_path", "path_length",
-        "having_query", "having_fragment", "having_anchor", "entropy_of_url",
-        "entropy_of_domain", "entropy_of_subdomain", "has_suspicious_word",
-        "uses_shortener", "suspicious_tld", "has_unicode", "has_mixed_script",
-        "has_confusable",
+        "path_depth", "having_query", "query_param_count",
+        "having_fragment", "having_anchor", "having_ip",
+        "entropy_of_url", "entropy_of_domain", "entropy_of_subdomain",
+        "digit_ratio", "special_char_ratio", "tld_length",
+        "has_suspicious_word", "uses_shortener", "suspicious_tld",
+        "has_unicode", "has_mixed_script", "has_confusable",
     ]
     for key in expected_keys:
         assert key in features, f"Missing feature: {key}"
