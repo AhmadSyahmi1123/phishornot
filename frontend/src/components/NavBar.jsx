@@ -11,7 +11,7 @@ export default function NavBar() {
   return (
     <nav className="bg-surface border-b border-border">
       <div className="max-w-5xl mx-auto px-4 flex items-center h-16">
-        <a href="/" className="flex items-center gap-2 mr-8 group hover:opacity-80 motion-safe:transition-opacity duration-150 focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:outline-none">
+        <a href="/" className="flex items-center gap-2 mr-8 group hover:opacity-80 motion-safe:transition-opacity duration-150 cursor-pointer focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:outline-none">
           <ShieldCheck size={24} weight="fill" className="text-accent" />
           <h1 className="text-xl font-bold text-[#F8FAFC] tracking-tight">
             phishornot?
@@ -24,7 +24,7 @@ export default function NavBar() {
               to={tab.path}
               end={tab.path === '/'}
               className={({ isActive }) =>
-                `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium motion-safe:transition-all duration-150 focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:outline-none ${
+                `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium motion-safe:transition-all duration-150 cursor-pointer focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:outline-none ${
                   isActive
                     ? 'bg-surface-muted text-accent'
                     : 'text-text-muted hover:text-[#F8FAFC] hover:bg-surface-muted/50'

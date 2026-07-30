@@ -131,12 +131,12 @@ function CheckPage({ history, onNewResult }) {
           placeholder="https://example.com"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          className="flex-1 bg-surface border border-border rounded-xl px-5 py-3.5 text-[#F8FAFC] placeholder-text-muted focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/30 transition-all duration-150 text-base"
+          className="flex-1 bg-surface border border-border rounded-xl px-5 py-3.5 text-[#F8FAFC] placeholder-text-muted focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/30 motion-safe:transition-all duration-150 text-base"
         />
         <button
           type="submit"
           disabled={loading || !url.trim()}
-          className="px-6 py-3.5 bg-accent hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed text-[#0F172A] rounded-xl font-semibold motion-safe:transition-all duration-150 active:scale-[0.98] cursor-pointer focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:outline-none"
+          className="px-6 py-3.5 bg-accent hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed text-[#0F172A] rounded-xl font-semibold motion-safe:transition-all duration-150 motion-safe:active:scale-[0.98] cursor-pointer focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:outline-none"
         >
           {loading ? (
             <span className="flex items-center gap-2">
