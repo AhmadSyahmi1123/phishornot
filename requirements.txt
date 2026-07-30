@@ -12,4 +12,5 @@ tldextract
 shap
 slowapi
 httpx
+beautifulsoup4
 pytest
