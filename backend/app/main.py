@@ -13,6 +13,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from backend.app.extract_feature import extract_features, normalize_url
+from backend.app.page_analyzer import fetch_page, compute_content_score
 
 app = FastAPI()
 
@@ -44,7 +45,6 @@ except FileNotFoundError:
     tfidf_vectorizer = None
     print("No TF-IDF vectorizer found, running without TF-IDF features")
 
-# Base feature count from metrics, fallback to counting non-TFIDF features
 BASE_FEATURE_COUNT = len([n for n in FEATURE_NAMES if not n.startswith("tfidf_")])
 
 THRESHOLD = 0.5
@@ -59,6 +59,9 @@ try:
     print(f"Optimal threshold loaded: {THRESHOLD}, base features: {BASE_FEATURE_COUNT}")
 except FileNotFoundError:
     print(f"No metrics found, using defaults: threshold={THRESHOLD}, base_features={BASE_FEATURE_COUNT}")
+
+SAFE_THRESHOLD = 0.35
+PHISHING_THRESHOLD = 0.65
 
 results_store: dict[str, dict] = {}
 RESULTS_TTL = 3600
@@ -83,6 +86,15 @@ REASON_TEMPLATES = {
     "has_confusable": "The URL contains characters that look like ASCII but are different Unicode codepoints",
 }
 
+
+def tier_from_score(score: float) -> str:
+    if score < SAFE_THRESHOLD:
+        return "safe"
+    if score > PHISHING_THRESHOLD:
+        return "phishing"
+    return "unsure"
+
+
 class URLRequest(BaseModel):
     url: str
 
@@ -99,15 +111,18 @@ class URLRequest(BaseModel):
             raise ValueError("URL must have a valid domain format")
         return v
 
+
 def clean_expired_results():
     now = time.time()
     expired = [rid for rid, r in results_store.items() if now - r["_ts"] > RESULTS_TTL]
     for rid in expired:
         del results_store[rid]
 
+
 def make_result_id(url: str) -> str:
     raw = f"{url}:{time.time()}"
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
 
 def get_features_for_url(url: str):
     cleaned = normalize_url(url)
@@ -123,9 +138,11 @@ def get_features_for_url(url: str):
 
     return cleaned, features, X
 
+
 @app.get("/health")
 def health():
     return {"status": "ok", "model": "xgboost"}
+
 
 @app.get("/result/{result_id}")
 def get_result(result_id: str):
@@ -136,14 +153,16 @@ def get_result(result_id: str):
     result = {k: v for k, v in entry.items() if k != "_ts"}
     return result
 
+
 @app.post("/predict")
-@limiter.limit("60/minute")
+@limiter.limit("20/minute")
 def predict(request: Request, data: URLRequest):
     try:
         cleaned, features, X = get_features_for_url(data.url)
         prob = model.predict_proba(X)[0][1]
         prediction = int(prob > THRESHOLD)
         status = "phishing" if prediction == 1 else "legitimate"
+        tier = tier_from_score(prob)
         result_id = make_result_id(cleaned)
 
         result = {
@@ -151,6 +170,7 @@ def predict(request: Request, data: URLRequest):
             "url": data.url,
             "normalized_url": cleaned,
             "is_phishing": status,
+            "tier": tier,
             "confidence": float(prob),
         }
         results_store[result_id] = {**result, "_ts": time.time()}
@@ -158,15 +178,22 @@ def predict(request: Request, data: URLRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.post("/predict-fast")
+@limiter.limit("20/minute")
+def predict_fast(request: Request, data: URLRequest):
+    return predict(request, data)
+
+
 @app.post("/explain")
-@limiter.limit("60/minute")
+@limiter.limit("20/minute")
 def explain(request: Request, data: URLRequest):
     try:
         import shap
 
         cleaned, features, X = get_features_for_url(data.url)
-        prob = model.predict_proba(X)[0][1]
-        prediction = int(prob > THRESHOLD)
+        xgb_conf = model.predict_proba(X)[0][1]
+        prediction = int(xgb_conf > THRESHOLD)
         status = "phishing" if prediction == 1 else "legitimate"
 
         explainer = shap.TreeExplainer(model)
@@ -181,7 +208,6 @@ def explain(request: Request, data: URLRequest):
         contributions = list(zip(all_feature_names, sv))
         contributions.sort(key=lambda x: abs(x[1]), reverse=True)
 
-        # Only show reasons that align with the final verdict
         target_sign = 1 if prediction == 1 else -1
         aligned = [(fname, c) for fname, c in contributions if c * target_sign > 0.001]
 
@@ -200,7 +226,6 @@ def explain(request: Request, data: URLRequest):
                 reason = f"The {readable} contributed to the prediction"
             top_reasons.append({"reason": reason, "impact": status})
 
-        # If no strong aligned reasons, fall back to the strongest contributor overall
         if not top_reasons and contributions:
             fname, contribution = contributions[0]
             impact = "phishing" if contribution > 0 else "legitimate"
@@ -218,13 +243,38 @@ def explain(request: Request, data: URLRequest):
                 "contribution": float(contribution),
             }
 
+        # Page content analysis
+        page_result = fetch_page(cleaned)
+        fetched_page = page_result["fetched"]
+
+        if fetched_page and page_result["soup"] is not None:
+            content_result = compute_content_score(
+                page_result["soup"],
+                page_result["domain"],
+                page_result["html"],
+            )
+            content_score = content_result["score"]
+            final_score = round((xgb_conf + content_score) / 2, 4)
+            content_reasons = content_result["reasons"]
+        else:
+            content_score = None
+            final_score = xgb_conf
+            content_reasons = []
+
+        tier = tier_from_score(final_score)
+
         result_id = make_result_id(cleaned)
         result = {
             "result_id": result_id,
             "url": data.url,
+            "normalized_url": cleaned,
             "is_phishing": status,
-            "confidence": float(prob),
-            "top_reasons": top_reasons,
+            "tier": tier,
+            "confidence": float(final_score),
+            "xgb_confidence": float(xgb_conf),
+            "content_confidence": float(content_score) if content_score is not None else None,
+            "fetched_page": fetched_page,
+            "top_reasons": top_reasons + content_reasons,
             "feature_breakdown": feature_breakdown,
         }
         results_store[result_id] = {**result, "_ts": time.time()}

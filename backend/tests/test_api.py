@@ -61,25 +61,41 @@ def test_predict_invalid_scheme():
     assert response.status_code == 422
 
 
+def test_predict_fast_endpoint():
+    response = client.post("/predict-fast", json={"url": "http://example.com"})
+    assert response.status_code == 200
+    data = response.json()
+    assert "result_id" in data
+    assert data["is_phishing"] in ("phishing", "legitimate")
+    assert isinstance(data["confidence"], float)
+    assert "tier" in data
+    assert data["tier"] in ("safe", "unsure", "phishing")
+
+
 def test_explain_endpoint():
     response = client.post("/explain", json={"url": "http://example.com"})
     assert response.status_code == 200
     data = response.json()
     assert "result_id" in data
     assert data["url"] == "http://example.com"
-    assert data["is_phishing"] in ("phishing", "legitimate")
+    assert "tier" in data
+    assert data["tier"] in ("safe", "unsure", "phishing")
     assert isinstance(data["confidence"], float)
+    assert "xgb_confidence" in data
+    assert isinstance(data["xgb_confidence"], float)
     assert "top_reasons" in data
     assert isinstance(data["top_reasons"], list)
     assert "feature_breakdown" in data
     assert isinstance(data["feature_breakdown"], dict)
+    assert "fetched_page" in data
+    assert isinstance(data["fetched_page"], bool)
 
 
 def test_explain_suspicious_url():
     response = client.post("/explain", json={"url": "http://login-verify-secure.xyz.tk"})
     assert response.status_code == 200
     data = response.json()
-    assert data["is_phishing"] in ("phishing", "legitimate")
+    assert data["tier"] in ("safe", "unsure", "phishing")
     assert len(data["top_reasons"]) > 0
 
 
@@ -104,6 +120,7 @@ def test_explain_no_scheme():
     response = client.post("/explain", json={"url": "example.com"})
     assert response.status_code == 422
 
+
 def test_get_result_found():
     pred = client.post("/predict", json={"url": "http://example.com"}).json()
     rid = pred["result_id"]
@@ -112,6 +129,7 @@ def test_get_result_found():
     data = response.json()
     assert data["result_id"] == rid
     assert data["url"] == "http://example.com"
+
 
 def test_get_result_not_found():
     response = client.get("/result/nonexistent123")
