@@ -111,20 +111,32 @@ function CheckPage({ history, onNewResult }) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
+      {/* Hero */}
+      {!result && !loading && !error && (
+        <div className="text-center pt-8 pb-4">
+          <h2 className="text-4xl sm:text-5xl font-bold text-[#F8FAFC] tracking-tight leading-tight">
+            Is this URL safe?
+          </h2>
+          <p className="mt-3 text-lg text-text-muted max-w-lg mx-auto">
+            Paste a link below and we'll analyze it for phishing, scams, and suspicious activity.
+          </p>
+        </div>
+      )}
+
       {/* Input Form */}
-      <form onSubmit={handleCheck} className="flex gap-3">
+      <form onSubmit={handleCheck} className="flex gap-3 max-w-2xl mx-auto">
         <input
           type="text"
-          placeholder="Enter a URL to check..."
+          placeholder="https://example.com"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-5 py-3.5 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-gray-600 transition-colors"
+          className="flex-1 bg-surface border border-border rounded-xl px-5 py-3.5 text-[#F8FAFC] placeholder-text-muted focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/30 transition-all duration-150 text-base"
         />
         <button
           type="submit"
           disabled={loading || !url.trim()}
-          className="px-6 py-3.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-xl font-medium transition-colors"
+          className="px-6 py-3.5 bg-accent hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed text-[#0F172A] rounded-xl font-semibold motion-safe:transition-all duration-150 active:scale-[0.98] cursor-pointer focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:outline-none"
         >
           {loading ? (
             <span className="flex items-center gap-2">
@@ -142,15 +154,15 @@ function CheckPage({ history, onNewResult }) {
 
       {/* Error */}
       {error && (
-        <div className="bg-red-900/30 border border-red-800 rounded-xl p-4 text-red-400 text-sm">
+        <div className="max-w-2xl mx-auto bg-destructive-muted border border-destructive/30 rounded-xl p-4 text-destructive text-sm motion-safe:animate-[fadeIn_200ms_ease]">
           {error}
         </div>
       )}
 
       {/* Loading */}
       {loading && (
-        <div className="flex flex-col items-center py-12 text-gray-500">
-          <svg className="animate-spin w-8 h-8 mb-3" fill="none" viewBox="0 0 24 24">
+        <div className="flex flex-col items-center py-16 text-text-muted motion-safe:animate-[fadeIn_200ms_ease]">
+          <svg className="animate-spin w-8 h-8 mb-4 text-accent" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
@@ -160,15 +172,28 @@ function CheckPage({ history, onNewResult }) {
 
       {/* Result */}
       {result && !loading && (
-        <ResultCard result={result} resultId={resultId} />
+        <div className="motion-safe:animate-[fadeInSlideUp_300ms_ease]">
+          <ResultCard result={result} resultId={resultId} />
+        </div>
       )}
 
       {!result && !loading && !error && (
-        <div className="text-center py-16 text-gray-600">
-          <p className="text-lg">Enter a URL above to check if it's phishing</p>
-          <p className="text-sm mt-2">Results are saved to your browsing history</p>
+        <div className="text-center py-8 text-text-muted">
+          <p className="text-sm">Your results and browsing history are stored locally.</p>
         </div>
       )}
+
+      {/* Keyframe for fade-in */}
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes fadeInSlideUp {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
     </div>
   )
 }
@@ -195,7 +220,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100">
+    <div className="min-h-screen bg-[#0F172A] text-[#F8FAFC]">
       <NavBar />
       <main className="max-w-3xl mx-auto px-4 py-8">
         <Routes>
