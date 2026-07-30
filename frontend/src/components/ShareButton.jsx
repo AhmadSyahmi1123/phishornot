@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ShareNetwork } from '@phosphor-icons/react'
 
 export default function ShareButton({ resultId }) {
   const [copied, setCopied] = useState(false)
@@ -12,7 +13,6 @@ export default function ShareButton({ resultId }) {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
-      // fallback
       const textarea = document.createElement('textarea')
       textarea.value = url
       document.body.appendChild(textarea)
@@ -27,8 +27,9 @@ export default function ShareButton({ resultId }) {
   return (
     <button
       onClick={handleShare}
-      className="text-xs px-3 py-1.5 rounded-lg border border-gray-600 text-gray-400 hover:text-white hover:border-gray-500 transition-colors"
+      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border text-text-muted hover:text-[#F8FAFC] hover:border-[#F8FAFC] motion-safe:transition-all duration-150 cursor-pointer active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:outline-none"
     >
+      <ShareNetwork size={14} />
       {copied ? 'Copied!' : 'Share'}
     </button>
   )
