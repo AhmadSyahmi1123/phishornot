@@ -35,25 +35,25 @@ export default function Dashboard({ history }) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-surface border border-border rounded-xl p-5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+        <div className="bg-surface border border-border rounded-2xl p-5 shadow-sm hover:scale-[1.02] hover:shadow-md motion-safe:transition-all duration-200">
           <p className="text-xs text-text-muted uppercase tracking-wider">Total Checks</p>
           <p className="text-3xl font-bold text-[#F8FAFC] mt-1">{stats.total}</p>
         </div>
-        <div className="bg-surface border border-border rounded-xl p-5">
+        <div className="bg-surface border border-border rounded-2xl p-5 shadow-sm hover:scale-[1.02] hover:shadow-md motion-safe:transition-all duration-200">
           <p className="text-xs text-text-muted uppercase tracking-wider">Phishing</p>
           <p className="text-3xl font-bold text-destructive mt-1">{stats.phishing}</p>
         </div>
-        <div className="bg-surface border border-border rounded-xl p-5">
+        <div className="bg-surface border border-border rounded-2xl p-5 shadow-sm hover:scale-[1.02] hover:shadow-md motion-safe:transition-all duration-200">
           <p className="text-xs text-text-muted uppercase tracking-wider">Legitimate</p>
           <p className="text-3xl font-bold text-accent mt-1">{stats.legitimate}</p>
         </div>
       </div>
 
       {/* Ratio Bar */}
-      <div className="bg-surface border border-border rounded-xl p-5">
+      <div className="bg-surface border border-border rounded-2xl p-5 shadow-sm hover:scale-[1.02] hover:shadow-md motion-safe:transition-all duration-200">
         <h3 className="text-sm font-semibold text-[#F8FAFC] mb-3">Phishing vs Legitimate Ratio</h3>
         <div className="w-full bg-[#0F172A] rounded-full h-6 overflow-hidden flex">
           <div
@@ -75,9 +75,9 @@ export default function Dashboard({ history }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         {/* Recent Checks */}
-        <div className="bg-surface border border-border rounded-xl p-5">
+        <div className="bg-surface border border-border rounded-2xl p-5 shadow-sm hover:scale-[1.02] hover:shadow-md motion-safe:transition-all duration-200">
           <h3 className="text-sm font-semibold text-[#F8FAFC] mb-3">Recent Checks</h3>
           <div className="space-y-2">
             {stats.recent.map((item) => (
@@ -98,7 +98,7 @@ export default function Dashboard({ history }) {
         </div>
 
         {/* Top Domains */}
-        <div className="bg-surface border border-border rounded-xl p-5">
+        <div className="bg-surface border border-border rounded-2xl p-5 shadow-sm hover:scale-[1.02] hover:shadow-md motion-safe:transition-all duration-200">
           <h3 className="text-sm font-semibold text-[#F8FAFC] mb-3">Most Checked Domains</h3>
           <div className="space-y-2">
             {stats.topDomains.map(([domain, count], i) => (
