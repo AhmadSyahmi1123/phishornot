@@ -154,27 +154,31 @@ def get_result(result_id: str):
     return result
 
 
+def _predict_url(data: URLRequest) -> dict:
+    cleaned, features, X = get_features_for_url(data.url)
+    prob = model.predict_proba(X)[0][1]
+    prediction = int(prob > THRESHOLD)
+    status = "phishing" if prediction == 1 else "legitimate"
+    tier = tier_from_score(prob)
+    result_id = make_result_id(cleaned)
+
+    result = {
+        "result_id": result_id,
+        "url": data.url,
+        "normalized_url": cleaned,
+        "is_phishing": status,
+        "tier": tier,
+        "confidence": float(prob),
+    }
+    results_store[result_id] = {**result, "_ts": time.time()}
+    return result
+
+
 @app.post("/predict")
 @limiter.limit("20/minute")
 def predict(request: Request, data: URLRequest):
     try:
-        cleaned, features, X = get_features_for_url(data.url)
-        prob = model.predict_proba(X)[0][1]
-        prediction = int(prob > THRESHOLD)
-        status = "phishing" if prediction == 1 else "legitimate"
-        tier = tier_from_score(prob)
-        result_id = make_result_id(cleaned)
-
-        result = {
-            "result_id": result_id,
-            "url": data.url,
-            "normalized_url": cleaned,
-            "is_phishing": status,
-            "tier": tier,
-            "confidence": float(prob),
-        }
-        results_store[result_id] = {**result, "_ts": time.time()}
-        return result
+        return _predict_url(data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -182,7 +186,10 @@ def predict(request: Request, data: URLRequest):
 @app.post("/predict-fast")
 @limiter.limit("20/minute")
 def predict_fast(request: Request, data: URLRequest):
-    return predict(request, data)
+    try:
+        return _predict_url(data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/explain")
