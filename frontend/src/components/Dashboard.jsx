@@ -28,7 +28,7 @@ export default function Dashboard({ history }) {
 
   if (stats.total === 0) {
     return (
-      <div className="text-center py-12 text-gray-500">
+      <div className="text-center py-12 text-text-muted">
         No data yet. Check some URLs to see dashboard stats.
       </div>
     )
@@ -38,56 +38,56 @@ export default function Dashboard({ history }) {
     <div className="space-y-6">
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-          <p className="text-xs text-gray-500 uppercase tracking-wider">Total Checks</p>
-          <p className="text-3xl font-bold text-white mt-1">{stats.total}</p>
+        <div className="bg-surface border border-border rounded-xl p-5">
+          <p className="text-xs text-text-muted uppercase tracking-wider">Total Checks</p>
+          <p className="text-3xl font-bold text-[#F8FAFC] mt-1">{stats.total}</p>
         </div>
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-          <p className="text-xs text-gray-500 uppercase tracking-wider">Phishing</p>
-          <p className="text-3xl font-bold text-red-400 mt-1">{stats.phishing}</p>
+        <div className="bg-surface border border-border rounded-xl p-5">
+          <p className="text-xs text-text-muted uppercase tracking-wider">Phishing</p>
+          <p className="text-3xl font-bold text-destructive mt-1">{stats.phishing}</p>
         </div>
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-          <p className="text-xs text-gray-500 uppercase tracking-wider">Legitimate</p>
-          <p className="text-3xl font-bold text-green-400 mt-1">{stats.legitimate}</p>
+        <div className="bg-surface border border-border rounded-xl p-5">
+          <p className="text-xs text-text-muted uppercase tracking-wider">Legitimate</p>
+          <p className="text-3xl font-bold text-accent mt-1">{stats.legitimate}</p>
         </div>
       </div>
 
       {/* Ratio Bar */}
-      <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-        <h3 className="text-sm font-semibold text-gray-300 mb-3">Phishing vs Legitimate Ratio</h3>
-        <div className="w-full bg-gray-700 rounded-full h-6 overflow-hidden flex">
+      <div className="bg-surface border border-border rounded-xl p-5">
+        <h3 className="text-sm font-semibold text-[#F8FAFC] mb-3">Phishing vs Legitimate Ratio</h3>
+        <div className="w-full bg-[#0F172A] rounded-full h-6 overflow-hidden flex">
           <div
-            className="bg-red-500 h-full transition-all duration-500 flex items-center justify-center text-xs font-bold text-white"
+            className="bg-destructive h-full motion-safe:transition-all duration-500 flex items-center justify-center text-xs font-bold text-white"
             style={{ width: `${stats.phishingPct}%` }}
           >
             {stats.phishingPct > 8 ? `${stats.phishingPct}%` : ''}
           </div>
           <div
-            className="bg-green-500 h-full transition-all duration-500 flex items-center justify-center text-xs font-bold text-white"
+            className="bg-accent h-full motion-safe:transition-all duration-500 flex items-center justify-center text-xs font-bold text-[#0F172A]"
             style={{ width: `${stats.legitPct}%` }}
           >
             {stats.legitPct > 8 ? `${stats.legitPct}%` : ''}
           </div>
         </div>
-        <div className="flex justify-between text-xs text-gray-500 mt-2">
-          <span className="text-red-400">Phishing</span>
-          <span className="text-green-400">Legitimate</span>
+        <div className="flex justify-between text-xs text-text-muted mt-2">
+          <span className="text-destructive">Phishing</span>
+          <span className="text-accent">Legitimate</span>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Recent Checks */}
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-gray-300 mb-3">Recent Checks</h3>
+        <div className="bg-surface border border-border rounded-xl p-5">
+          <h3 className="text-sm font-semibold text-[#F8FAFC] mb-3">Recent Checks</h3>
           <div className="space-y-2">
             {stats.recent.map((item) => (
               <div key={item.id} className="flex items-center justify-between text-sm">
-                <span className="text-gray-400 truncate flex-1 mr-2">{item.url}</span>
+                <span className="text-text-muted truncate flex-1 mr-2">{item.url}</span>
                 <span
                   className={`text-xs font-semibold px-2 py-0.5 rounded shrink-0 ${
                     item.is_phishing === 'phishing'
-                      ? 'bg-red-900/50 text-red-400'
-                      : 'bg-green-900/50 text-green-400'
+                      ? 'bg-destructive-muted text-destructive'
+                      : 'bg-accent-muted text-accent'
                   }`}
                 >
                   {item.is_phishing === 'phishing' ? 'Phishing' : 'Legit'}
@@ -98,16 +98,16 @@ export default function Dashboard({ history }) {
         </div>
 
         {/* Top Domains */}
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-gray-300 mb-3">Most Checked Domains</h3>
+        <div className="bg-surface border border-border rounded-xl p-5">
+          <h3 className="text-sm font-semibold text-[#F8FAFC] mb-3">Most Checked Domains</h3>
           <div className="space-y-2">
             {stats.topDomains.map(([domain, count], i) => (
               <div key={domain} className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-xs text-gray-600 w-5 text-right shrink-0">{i + 1}.</span>
-                  <span className="text-gray-400 truncate">{domain}</span>
+                  <span className="text-xs text-text-muted/50 w-5 text-right shrink-0">{i + 1}.</span>
+                  <span className="text-text-muted truncate">{domain}</span>
                 </div>
-                <span className="text-gray-500 text-xs shrink-0 ml-2">{count} check{count > 1 ? 's' : ''}</span>
+                <span className="text-text-muted text-xs shrink-0 ml-2">{count} check{count > 1 ? 's' : ''}</span>
               </div>
             ))}
           </div>
