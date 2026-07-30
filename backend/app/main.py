@@ -12,7 +12,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from backend.app.extract_feature import extract_features
+from backend.app.extract_feature import extract_features, normalize_url
 
 app = FastAPI()
 
@@ -36,8 +36,32 @@ FEATURE_NAMES_PATH = "backend/app/models/train/output_xgb/feature_names.json"
 with open(FEATURE_NAMES_PATH, "r") as f:
     FEATURE_NAMES = json.load(f)
 
+TFIDF_PATH = "backend/app/models/train/output_xgb/tfidf_vectorizer.joblib"
+try:
+    tfidf_vectorizer = joblib.load(TFIDF_PATH)
+    print("TF-IDF vectorizer loaded successfully")
+except FileNotFoundError:
+    tfidf_vectorizer = None
+    print("No TF-IDF vectorizer found, running without TF-IDF features")
+
+# Base feature count from metrics, fallback to counting non-TFIDF features
+BASE_FEATURE_COUNT = len([n for n in FEATURE_NAMES if not n.startswith("tfidf_")])
+
+THRESHOLD = 0.5
+METRICS_PATH = "backend/app/models/train/output_xgb/test_metrics.json"
+try:
+    with open(METRICS_PATH, "r") as f:
+        metrics = json.load(f)
+    THRESHOLD = metrics.get("optimal_threshold", 0.5)
+    base_cnt = metrics.get("base_feature_count")
+    if base_cnt is not None:
+        BASE_FEATURE_COUNT = base_cnt
+    print(f"Optimal threshold loaded: {THRESHOLD}, base features: {BASE_FEATURE_COUNT}")
+except FileNotFoundError:
+    print(f"No metrics found, using defaults: threshold={THRESHOLD}, base_features={BASE_FEATURE_COUNT}")
+
 results_store: dict[str, dict] = {}
-RESULTS_TTL = 3600  # 1 hour
+RESULTS_TTL = 3600
 
 REASON_TEMPLATES = {
     "has_suspicious_word": "The URL contains suspicious keywords like 'login' and 'verify'",
@@ -54,10 +78,10 @@ REASON_TEMPLATES = {
     "having_repeated_digits_in_domain": "The domain has repeated digits",
     "entropy_of_url": "The URL has unusual randomness/entropy",
     "entropy_of_domain": "The domain has unusual randomness/entropy",
+    "has_unicode": "The URL contains non-ASCII characters, often used in homograph attacks",
+    "has_mixed_script": "The URL mixes characters from different scripts, a sign of homograph spoofing",
+    "has_confusable": "The URL contains characters that look like ASCII but are different Unicode codepoints",
 }
-
-def normalize_url(url: str) -> str:
-    return url.rstrip("/") if url.endswith("/") and url.count("/") <= 3 else url
 
 class URLRequest(BaseModel):
     url: str
@@ -88,7 +112,15 @@ def make_result_id(url: str) -> str:
 def get_features_for_url(url: str):
     cleaned = normalize_url(url)
     features = extract_features(cleaned)
-    X = np.array([features[name] for name in FEATURE_NAMES]).reshape(1, -1)
+
+    base_vec = np.array([features[name] for name in FEATURE_NAMES[:BASE_FEATURE_COUNT]])
+
+    if tfidf_vectorizer is not None:
+        tfidf_vec = tfidf_vectorizer.transform([cleaned]).toarray()[0]
+        X = np.concatenate([base_vec, tfidf_vec]).reshape(1, -1)
+    else:
+        X = base_vec.reshape(1, -1)
+
     return cleaned, features, X
 
 @app.get("/health")
@@ -110,7 +142,7 @@ def predict(request: Request, data: URLRequest):
     try:
         cleaned, features, X = get_features_for_url(data.url)
         prob = model.predict_proba(X)[0][1]
-        prediction = int(prob > 0.5)
+        prediction = int(prob > THRESHOLD)
         status = "phishing" if prediction == 1 else "legitimate"
         result_id = make_result_id(cleaned)
 
@@ -134,7 +166,7 @@ def explain(request: Request, data: URLRequest):
 
         cleaned, features, X = get_features_for_url(data.url)
         prob = model.predict_proba(X)[0][1]
-        prediction = int(prob > 0.5)
+        prediction = int(prob > THRESHOLD)
         status = "phishing" if prediction == 1 else "legitimate"
 
         explainer = shap.TreeExplainer(model)
@@ -145,19 +177,35 @@ def explain(request: Request, data: URLRequest):
         else:
             sv = shap_values[0]
 
-        contributions = list(zip(FEATURE_NAMES, sv))
+        all_feature_names = FEATURE_NAMES
+        contributions = list(zip(all_feature_names, sv))
         contributions.sort(key=lambda x: abs(x[1]), reverse=True)
 
+        # Only show reasons that align with the final verdict
+        target_sign = 1 if prediction == 1 else -1
+        aligned = [(fname, c) for fname, c in contributions if c * target_sign > 0.001]
+
         top_reasons = []
-        for fname, contribution in contributions[:5]:
-            if abs(contribution) < 0.001:
-                continue
-            impact = "phishing" if contribution > 0 else "legitimate"
+        for fname, contribution in aligned[:5]:
             if fname in REASON_TEMPLATES:
                 reason = REASON_TEMPLATES[fname]
             elif "suspicious" in fname:
                 readable = fname.replace("_", " ")
                 reason = f"The {readable} appears suspicious"
+            elif fname.startswith("tfidf_"):
+                ngram = fname.replace("tfidf_", "")
+                reason = f"The URL contains character pattern '{ngram}' associated with phishing"
+            else:
+                readable = fname.replace("_", " ")
+                reason = f"The {readable} contributed to the prediction"
+            top_reasons.append({"reason": reason, "impact": status})
+
+        # If no strong aligned reasons, fall back to the strongest contributor overall
+        if not top_reasons and contributions:
+            fname, contribution = contributions[0]
+            impact = "phishing" if contribution > 0 else "legitimate"
+            if fname in REASON_TEMPLATES:
+                reason = REASON_TEMPLATES[fname]
             else:
                 readable = fname.replace("_", " ")
                 reason = f"The {readable} contributed to the prediction"
@@ -166,7 +214,7 @@ def explain(request: Request, data: URLRequest):
         feature_breakdown = {}
         for fname, contribution in contributions:
             feature_breakdown[fname] = {
-                "value": float(features[fname]),
+                "value": float(features[fname]) if fname in features else 0.0,
                 "contribution": float(contribution),
             }
 

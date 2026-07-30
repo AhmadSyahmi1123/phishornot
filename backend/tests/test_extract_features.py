@@ -86,6 +86,25 @@ def test_entropy_values():
     features = extract_features("http://example.com")
     assert features["entropy_of_url"] > 0
     assert features["entropy_of_domain"] > 0
+    assert features["entropy_of_subdomain"] == 0
+
+
+def test_homograph_unicode_url():
+    features = extract_features("http://exаmple.com")  # Cyrillic 'а'
+    assert features["has_unicode"] == 1
+    assert features["has_confusable"] == 1
+
+
+def test_homograph_mixed_script():
+    features = extract_features("http://exаmple.com")  # Cyrillic 'а' in domain
+    assert features["has_mixed_script"] == 1
+
+
+def test_pure_ascii_url():
+    features = extract_features("http://example.com")
+    assert features["has_unicode"] == 0
+    assert features["has_mixed_script"] == 0
+    assert features["has_confusable"] == 0
 
 
 def test_all_feature_keys_present():
@@ -111,7 +130,9 @@ def test_all_feature_keys_present():
         "having_digits_in_subdomain", "number_of_digits_in_subdomain",
         "having_repeated_digits_in_subdomain", "having_path", "path_length",
         "having_query", "having_fragment", "having_anchor", "entropy_of_url",
-        "entropy_of_domain", "has_suspicious_word", "uses_shortener", "suspicious_tld",
+        "entropy_of_domain", "entropy_of_subdomain", "has_suspicious_word",
+        "uses_shortener", "suspicious_tld", "has_unicode", "has_mixed_script",
+        "has_confusable",
     ]
     for key in expected_keys:
         assert key in features, f"Missing feature: {key}"

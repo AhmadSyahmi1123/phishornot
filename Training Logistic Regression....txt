@@ -1,0 +1,78 @@
+Training Logistic Regression...
+Logistic Regression Results:
+Accuracy: 0.9464285714285714
+Precision: 0.9187432286023836
+Recall: 0.9881146585877418
+F1 Score: 0.9521670783741298
+              precision    recall  f1-score   support
+
+       Legit       0.98      0.90      0.94      3661
+       Phish       0.92      0.99      0.95      4291
+
+    accuracy                           0.95      7952
+   macro avg       0.95      0.94      0.95      7952
+weighted avg       0.95      0.95      0.95      7952
+
+Training SVM...
+SVM Results:
+Accuracy: 0.9437877263581489
+Precision: 0.9147604661199827
+Recall: 0.9878816126776975
+F1 Score: 0.9499159663865546
+              precision    recall  f1-score   support
+
+       Legit       0.98      0.89      0.94      3661
+       Phish       0.91      0.99      0.95      4291
+
+    accuracy                           0.94      7952
+   macro avg       0.95      0.94      0.94      7952
+weighted avg       0.95      0.94      0.94      7952
+
+Training Random Forest...
+Random Forest Results:
+Accuracy: 0.9822686116700201
+Precision: 0.9783310281235592
+Recall: 0.9890468422279189
+F1 Score: 0.9836597519990729
+              precision    recall  f1-score   support
+
+       Legit       0.99      0.97      0.98      3661
+       Phish       0.98      0.99      0.98      4291
+
+    accuracy                           0.98      7952
+   macro avg       0.98      0.98      0.98      7952
+weighted avg       0.98      0.98      0.98      7952
+
+Training XGBoost...
+C:\Users\Ahmad Syahmi\AppData\Roaming\Python\Python313\site-packages\xgboost\training.py:183: UserWarning: [10:43:35] WARNING: C:\actions-runner\_work\xgboost\xgboost\src\learner.cc:738:
+Parameters: { "use_label_encoder" } are not used.
+
+  bst.update(dtrain, iteration=i, fobj=obj)
+XGBoost Results:
+Accuracy: 0.9928319919517102
+Precision: 0.9920966992096699
+Recall: 0.9946399440689816
+F1 Score: 0.9933666938205516
+              precision    recall  f1-score   support
+
+       Legit       0.99      0.99      0.99      3661
+       Phish       0.99      0.99      0.99      4291
+
+    accuracy                           0.99      7952
+   macro avg       0.99      0.99      0.99      7952
+weighted avg       0.99      0.99      0.99      7952
+
+Training MLP (Neural Net)...
+MLP (Neural Net) Results:
+Accuracy: 0.9927062374245473
+Precision: 0.9873359428966152
+Recall: 0.9993008622698671
+F1 Score: 0.9932823720176048
+              precision    recall  f1-score   support
+
+       Legit       1.00      0.98      0.99      3661
+       Phish       0.99      1.00      0.99      4291
+
+    accuracy                           0.99      7952
+   macro avg       0.99      0.99      0.99      7952
+weighted avg       0.99      0.99      0.99      7952

@@ -3,13 +3,42 @@ from urllib.parse import urlparse
 import joblib
 import numpy as np
 import math
+import unicodedata
 from collections import Counter
 import tldextract
 import pandas as pd
 
-SUSPICIOUS_WORDS = ["secure", "account", "login", "bank", "verify", "update", "password"]
-SHORTENERS = ["bit.ly", "goo.gl", "tinyurl", "ow.ly", "t.co", "is.gd", "buff.ly", "adf.ly", "cutt.ly"]
-SUSPICIOUS_TLDS = ["tk", "ml", "ga", "cf", "gq"]
+SUSPICIOUS_WORDS = [
+    "secure", "account", "login", "bank", "verify", "update", "password",
+    "confirm", "signin", "auth", "authenticate", "validate", "reset",
+    "recover", "unlock", "alert", "support", "security", "webscr",
+    "paypal", "dropbox", "apple", "google", "microsoft", "netflix",
+    "chase", "wellsfargo", "amex", "alert", "warning", "suspicious",
+    "unusual", "activity", "blocked", "limited", "restricted", "invoice",
+    "bill", "payment", "refund", "claim", "prize", "winner", "free",
+    "bonus", "reward", "coupon", "promo", "offer", "discount",
+]
+SHORTENERS = [
+    "bit.ly", "goo.gl", "tinyurl", "ow.ly", "t.co", "is.gd", "buff.ly",
+    "adf.ly", "cutt.ly", "shorturl", "tiny.cc", "tr.im", "v.gd",
+    "cli.gs", "ur1.ca", "tiny.pl", "bc.vc", "budurl", "snipurl",
+    "shorl", "x.co", "2.gp", "short.to", "link.zip", "rb.gy",
+]
+SUSPICIOUS_TLDS = [
+    "tk", "ml", "ga", "cf", "gq", "top", "xyz", "club", "work",
+    "click", "review", "download", "bid", "date", "loan", "men",
+    "win", "trade", "webcam", "science", "racing", "stream",
+    "gdn", "vip", "party", "mom", "xin", "kim", "red",
+]
+
+# Unicode confusable characters that look like ASCII letters
+CONFUSABLES = {
+    'a': 'аàáâãäåāăąć', 'c': 'čçćċĉ', 'e': 'èéêëēĕęė', 'i': 'ìíîïīĭį',
+    'o': 'òóôõöōŏő', 'u': 'ùúûüūŭű', 'y': 'ÿý', 'n': 'ñńň',
+    's': 'šşśŝ', 'z': 'žźż', 'p': 'р', 'x': 'х', 'm': 'м',
+}
+
+CONFUSABLE_SET = set(''.join(CONFUSABLES.values()))
 
 def shannon_entropy(s):
     if not s:
@@ -22,6 +51,34 @@ def has_repeated_digits(s):
 
 def count_special_chars(s):
     return sum(1 for c in s if not c.isalnum() and c not in ['.', '/', '?', '=', '-', '_', '@', '$', '!', '#', '%'])
+
+def get_scripts(s):
+    """Return set of Unicode script names present in string."""
+    scripts = set()
+    for c in s:
+        try:
+            scripts.add(unicodedata.name(c).split(' ')[0])
+        except (ValueError, IndexError):
+            scripts.add('UNKNOWN')
+    return scripts
+
+def has_confusable_chars(s):
+    """Check if string contains characters confusable with ASCII."""
+    for c in s:
+        if c in CONFUSABLE_SET:
+            return 1
+    return 0
+
+def has_mixed_script(s):
+    """Check if string contains characters from multiple Unicode scripts."""
+    latin_count = 0
+    non_latin_count = 0
+    for c in s:
+        if c.isascii():
+            latin_count += 1
+        elif ord(c) > 127:
+            non_latin_count += 1
+    return int(latin_count > 0 and non_latin_count > 0)
 
 def extract_features(url):
     parsed = urlparse(url)
@@ -89,11 +146,18 @@ def extract_features(url):
     # Entropy
     features["entropy_of_url"] = shannon_entropy(url)
     features["entropy_of_domain"] = shannon_entropy(domain)
+    features["entropy_of_subdomain"] = shannon_entropy(subdomain) if subdomain else 0
 
     # Threat indicators
     features["has_suspicious_word"] = int(any(word in url.lower() for word in SUSPICIOUS_WORDS))
     features["uses_shortener"] = int(any(short in url for short in SHORTENERS))
     features["suspicious_tld"] = int(ext.suffix.lower() in SUSPICIOUS_TLDS)
+
+    # Homograph / Unicode detection
+    domain_for_check = domain + subdomain
+    features["has_unicode"] = int(any(ord(c) > 127 for c in url))
+    features["has_mixed_script"] = has_mixed_script(domain_for_check)
+    features["has_confusable"] = has_confusable_chars(domain_for_check)
 
     return features
 
