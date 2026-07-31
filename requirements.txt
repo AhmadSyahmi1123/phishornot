@@ -5,12 +5,10 @@ joblib
 numpy
 pydantic
 python-multipart
-aiofiles
-python-whois
-dnspython
+httpx
+beautifulsoup4
 tldextract
 shap
 slowapi
-httpx
-beautifulsoup4
 pytest
+google-generativeai

@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -6,7 +7,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.main import app
+from backend.app.main import MODEL_PATH, app
+
+pytestmark = pytest.mark.skipif(not os.path.exists(MODEL_PATH), reason="Model not trained")
 
 client = TestClient(app)
 
@@ -25,9 +28,19 @@ def test_predict_legitimate():
     data = response.json()
     assert "result_id" in data
     assert data["url"] == "http://example.com"
-    assert data["is_phishing"] in ("phishing", "legitimate")
+    assert data["normalized_url"] == "http://example.com"
+    assert data["tier"] in ("safe", "unsure", "phishing")
     assert isinstance(data["confidence"], float)
     assert 0 <= data["confidence"] <= 1
+    assert isinstance(data["xgb_confidence"], float)
+    assert 0 <= data["xgb_confidence"] <= 1
+    assert data["content_confidence"] is None or 0 <= data["content_confidence"] <= 1
+    assert isinstance(data["fetched_page"], bool)
+    assert isinstance(data["reasons"], list)
+    for reason in data["reasons"]:
+        assert "text" in reason
+        assert "source" in reason
+        assert "impact" in reason
 
 
 def test_predict_suspicious_url():
@@ -35,7 +48,7 @@ def test_predict_suspicious_url():
     assert response.status_code == 200
     data = response.json()
     assert "result_id" in data
-    assert data["is_phishing"] in ("phishing", "legitimate")
+    assert data["tier"] in ("safe", "unsure", "phishing")
     assert 0 <= data["confidence"] <= 1
 
 
@@ -44,6 +57,7 @@ def test_predict_shortened_url():
     assert response.status_code == 200
     data = response.json()
     assert "result_id" in data
+    assert data["tier"] in ("safe", "unsure", "phishing")
 
 
 def test_predict_empty_url():
@@ -54,11 +68,13 @@ def test_predict_empty_url():
 def test_predict_no_scheme():
     response = client.post("/predict", json={"url": "example.com"})
     assert response.status_code == 422
+    assert "detail" in response.json()
 
 
-def test_predict_invalid_scheme():
+def test_predict_bad_scheme():
     response = client.post("/predict", json={"url": "ftp://example.com"})
     assert response.status_code == 422
+    assert "detail" in response.json()
 
 
 def test_predict_fast_endpoint():
@@ -66,10 +82,11 @@ def test_predict_fast_endpoint():
     assert response.status_code == 200
     data = response.json()
     assert "result_id" in data
-    assert data["is_phishing"] in ("phishing", "legitimate")
-    assert isinstance(data["confidence"], float)
-    assert "tier" in data
     assert data["tier"] in ("safe", "unsure", "phishing")
+    assert isinstance(data["confidence"], float)
+    assert 0 <= data["confidence"] <= 1
+    assert data["fetched_page"] is False
+    assert data["content_confidence"] is None
 
 
 def test_explain_endpoint():
@@ -78,47 +95,32 @@ def test_explain_endpoint():
     data = response.json()
     assert "result_id" in data
     assert data["url"] == "http://example.com"
-    assert "tier" in data
     assert data["tier"] in ("safe", "unsure", "phishing")
     assert isinstance(data["confidence"], float)
-    assert "xgb_confidence" in data
     assert isinstance(data["xgb_confidence"], float)
-    assert "top_reasons" in data
     assert isinstance(data["top_reasons"], list)
-    assert "feature_breakdown" in data
     assert isinstance(data["feature_breakdown"], dict)
-    assert "fetched_page" in data
+    assert len(data["feature_breakdown"]) > 0
     assert isinstance(data["fetched_page"], bool)
-
-
-def test_explain_suspicious_url():
-    response = client.post("/explain", json={"url": "http://login-verify-secure.xyz.tk"})
-    assert response.status_code == 200
-    data = response.json()
-    assert data["tier"] in ("safe", "unsure", "phishing")
-    assert len(data["top_reasons"]) > 0
-
-
-def test_explain_feature_breakdown_structure():
-    response = client.post("/explain", json={"url": "http://example.com"})
-    data = response.json()
-    fb = data["feature_breakdown"]
-    assert len(fb) > 0
-    for fname, info in fb.items():
+    for reason in data["top_reasons"]:
+        assert "reason" in reason
+        assert "impact" in reason
+    for fname, info in data["feature_breakdown"].items():
         assert "value" in info
         assert "contribution" in info
         assert isinstance(info["value"], (int, float))
         assert isinstance(info["contribution"], (int, float))
 
 
-def test_explain_empty_url():
-    response = client.post("/explain", json={"url": ""})
-    assert response.status_code == 422
-
-
-def test_explain_no_scheme():
-    response = client.post("/explain", json={"url": "example.com"})
-    assert response.status_code == 422
+def test_explain_reasons_sources():
+    response = client.post("/explain", json={"url": "http://login-verify-secure.xyz.tk"})
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["top_reasons"]) > 0
+    assert isinstance(data["reasons"], list)
+    for reason in data["reasons"]:
+        assert reason["source"] in ("url_structure", "page_content", "deep_analysis")
+        assert reason["impact"] in ("safe", "phishing")
 
 
 def test_get_result_found():

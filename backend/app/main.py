@@ -1,6 +1,8 @@
+import asyncio
 import hashlib
 import json
 import time
+from pathlib import Path
 from urllib.parse import urlparse
 
 import joblib
@@ -12,10 +14,13 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from backend.app.config import RATE_LIMIT, RESULTS_TTL, REASON_TEMPLATES
 from backend.app.extract_feature import extract_features, normalize_url
-from backend.app.page_analyzer import fetch_page, compute_content_score
+from backend.app.fusion import decide_tier, fuse_stage1_stage2, fuse_with_llm
+from backend.app.llm_analyzer import analyze_with_llm
+from backend.app.page_analyzer import compute_content_score, extract_page_text, fetch_page
 
-app = FastAPI()
+app = FastAPI(title="PhishOrNot API", version="3.0.0")
 
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
@@ -29,70 +34,173 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MODEL_PATH = "backend/app/models/train/output_xgb/xgboost_url_phishing.joblib"
-model = joblib.load(MODEL_PATH)
-print("XGBoost model loaded successfully")
+MODEL_DIR = Path(__file__).resolve().parent / "models" / "train" / "output_xgb"
+MODEL_PATH = str(MODEL_DIR / "xgboost_url_phishing.joblib")
+FEATURE_NAMES_PATH = str(MODEL_DIR / "feature_names.json")
+TFIDF_PATH = str(MODEL_DIR / "tfidf_vectorizer.joblib")
+METRICS_PATH = str(MODEL_DIR / "test_metrics.json")
 
-FEATURE_NAMES_PATH = "backend/app/models/train/output_xgb/feature_names.json"
-with open(FEATURE_NAMES_PATH, "r") as f:
-    FEATURE_NAMES = json.load(f)
+model = None
+FEATURE_NAMES: list = []
+tfidf_vectorizer = None
+BASE_FEATURE_COUNT = 0
 
-TFIDF_PATH = "backend/app/models/train/output_xgb/tfidf_vectorizer.joblib"
-try:
-    tfidf_vectorizer = joblib.load(TFIDF_PATH)
-    print("TF-IDF vectorizer loaded successfully")
-except FileNotFoundError:
-    tfidf_vectorizer = None
-    print("No TF-IDF vectorizer found, running without TF-IDF features")
-
-BASE_FEATURE_COUNT = len([n for n in FEATURE_NAMES if not n.startswith("tfidf_")])
-
-THRESHOLD = 0.5
-METRICS_PATH = "backend/app/models/train/output_xgb/test_metrics.json"
-try:
-    with open(METRICS_PATH, "r") as f:
-        metrics = json.load(f)
-    THRESHOLD = metrics.get("optimal_threshold", 0.5)
-    base_cnt = metrics.get("base_feature_count")
-    if base_cnt is not None:
-        BASE_FEATURE_COUNT = base_cnt
-    print(f"Optimal threshold loaded: {THRESHOLD}, base features: {BASE_FEATURE_COUNT}")
-except FileNotFoundError:
-    print(f"No metrics found, using defaults: threshold={THRESHOLD}, base_features={BASE_FEATURE_COUNT}")
-
-SAFE_THRESHOLD = 0.35
-PHISHING_THRESHOLD = 0.65
-
-results_store: dict[str, dict] = {}
-RESULTS_TTL = 3600
-
-REASON_TEMPLATES = {
-    "has_suspicious_word": "The URL contains suspicious keywords like 'login' and 'verify'",
-    "suspicious_tld": "The URL uses a suspicious top-level domain",
-    "uses_shortener": "The URL uses a known URL shortener service",
-    "number_of_slash_in_url": "The URL has an unusually high number of slashes",
-    "url_length": "The URL is unusually long",
-    "number_of_digits_in_url": "The URL contains an unusual number of digits",
-    "number_of_subdomains": "The URL has an unusual number of subdomains",
-    "having_path": "The URL includes a path",
-    "path_length": "The URL path is unusually long",
-    "number_of_special_char_in_url": "The URL contains unusual special characters",
-    "number_of_digits_in_domain": "The domain contains unusual digits",
-    "having_repeated_digits_in_domain": "The domain has repeated digits",
-    "entropy_of_url": "The URL has unusual randomness/entropy",
-    "entropy_of_domain": "The domain has unusual randomness/entropy",
-    "has_unicode": "The URL contains non-ASCII characters, often used in homograph attacks",
-    "has_mixed_script": "The URL mixes characters from different scripts, a sign of homograph spoofing",
-    "has_confusable": "The URL contains characters that look like ASCII but are different Unicode codepoints",
-}
+results_store: dict = {}
+_explainer = None
 
 
-def tier_from_score(score: float) -> str:
-    if score < SAFE_THRESHOLD:
-        return "safe"
-    if score > PHISHING_THRESHOLD:
-        return "phishing"
-    return "unsure"
+def load_model():
+    global model, FEATURE_NAMES, tfidf_vectorizer, BASE_FEATURE_COUNT
+    try:
+        model = joblib.load(MODEL_PATH)
+    except FileNotFoundError:
+        return
+    with open(FEATURE_NAMES_PATH, "r") as f:
+        FEATURE_NAMES = json.load(f)
+    try:
+        with open(METRICS_PATH, "r") as f:
+            metrics = json.load(f)
+        base_cnt = metrics.get("base_feature_count")
+        if base_cnt is not None:
+            BASE_FEATURE_COUNT = int(base_cnt)
+    except (FileNotFoundError, ValueError):
+        pass
+    if BASE_FEATURE_COUNT == 0:
+        BASE_FEATURE_COUNT = len([n for n in FEATURE_NAMES if not n.startswith("tfidf_")])
+    try:
+        tfidf_vectorizer = joblib.load(TFIDF_PATH)
+    except FileNotFoundError:
+        tfidf_vectorizer = None
+
+
+load_model()
+
+
+def get_features_for_url(url: str):
+    cleaned = normalize_url(url)
+    features = extract_features(cleaned)
+    base_vec = np.array([features[name] for name in FEATURE_NAMES[:BASE_FEATURE_COUNT]])
+
+    if tfidf_vectorizer is not None:
+        tfidf_vec = tfidf_vectorizer.transform([cleaned]).toarray()[0]
+        X = np.concatenate([base_vec, tfidf_vec]).reshape(1, -1)
+    else:
+        X = base_vec.reshape(1, -1)
+
+    return cleaned, features, X
+
+
+def model_feature_names() -> list:
+    if tfidf_vectorizer is not None:
+        return FEATURE_NAMES
+    return FEATURE_NAMES[:BASE_FEATURE_COUNT]
+
+
+def get_explainer():
+    global _explainer
+    if _explainer is None:
+        import shap
+
+        _explainer = shap.TreeExplainer(model)
+    return _explainer
+
+
+def make_result_id(url: str) -> str:
+    raw = f"{url}:{time.time()}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def clean_expired_results():
+    now = time.time()
+    expired = [rid for rid, r in results_store.items() if now - r["_ts"] > RESULTS_TTL]
+    for rid in expired:
+        del results_store[rid]
+
+
+def store_result(result: dict) -> str:
+    rid = result["result_id"]
+    results_store[rid] = {**result, "_ts": time.time()}
+    return rid
+
+
+def url_structure_reasons(features: dict) -> list:
+    reasons = []
+    flag_features = [
+        "has_suspicious_word",
+        "suspicious_tld",
+        "uses_shortener",
+        "having_ip",
+        "having_repeated_digits_in_domain",
+        "has_unicode",
+        "has_mixed_script",
+        "has_confusable",
+    ]
+    thresholds = {
+        "number_of_slash_in_url": 4,
+        "url_length": 75,
+        "number_of_digits_in_url": 8,
+        "number_of_subdomains": 3,
+        "path_length": 30,
+        "number_of_special_char_in_url": 4,
+        "number_of_digits_in_domain": 4,
+        "entropy_of_url": 4.5,
+        "entropy_of_domain": 3.5,
+    }
+    for fname in flag_features:
+        if fname in REASON_TEMPLATES and features.get(fname):
+            reasons.append({"text": REASON_TEMPLATES[fname], "source": "url_structure", "impact": "phishing"})
+    for fname, threshold in thresholds.items():
+        if fname in REASON_TEMPLATES and features.get(fname, 0) > threshold:
+            reasons.append({"text": REASON_TEMPLATES[fname], "source": "url_structure", "impact": "phishing"})
+    if not reasons:
+        reasons.append({"text": "URL structure appears normal", "source": "url_structure", "impact": "safe"})
+    return reasons
+
+
+def content_reasons(content_result: dict) -> list:
+    return [
+        {"text": r["text"], "source": "page_content", "impact": r["type"]}
+        for r in content_result.get("reasons", [])
+    ]
+
+
+def shap_breakdown_and_top_reasons(X: np.ndarray):
+    explainer = get_explainer()
+    raw = explainer.shap_values(X)
+    if isinstance(raw, list):
+        sv = raw[1][0] if len(raw) > 1 else raw[0][0]
+    else:
+        sv = raw[0]
+    sv = np.asarray(sv, dtype=float)
+
+    names = model_feature_names()
+    breakdown = {}
+    for i, name in enumerate(names):
+        breakdown[name] = {"value": float(X[0][i]), "contribution": float(sv[i])}
+
+    contributions = sorted(zip(names, sv), key=lambda x: abs(x[1]), reverse=True)
+    target_sign = 1 if float(model.predict_proba(X)[0][1]) >= 0.5 else -1
+
+    top_reasons = []
+    for fname, contribution in contributions:
+        if len(top_reasons) >= 5:
+            break
+        if abs(contribution) <= 0.001 or contribution * target_sign <= 0:
+            continue
+        impact = "phishing" if contribution > 0 else "safe"
+        if impact == "phishing":
+            if fname in REASON_TEMPLATES:
+                text = REASON_TEMPLATES[fname]
+            elif fname.startswith("tfidf_"):
+                text = f"URL contains character pattern '{fname[6:]}' associated with phishing"
+            else:
+                text = f"The {fname.replace('_', ' ')} is suspicious"
+        else:
+            text = f"The {fname.replace('_', ' ')} is normal and not phishing-like"
+        top_reasons.append({"reason": text, "impact": impact})
+    if not top_reasons:
+        top_reasons.append({"reason": "No strong signals found in the URL", "impact": "safe"})
+    return breakdown, top_reasons
 
 
 class URLRequest(BaseModel):
@@ -112,36 +220,14 @@ class URLRequest(BaseModel):
         return v
 
 
-def clean_expired_results():
-    now = time.time()
-    expired = [rid for rid, r in results_store.items() if now - r["_ts"] > RESULTS_TTL]
-    for rid in expired:
-        del results_store[rid]
-
-
-def make_result_id(url: str) -> str:
-    raw = f"{url}:{time.time()}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:16]
-
-
-def get_features_for_url(url: str):
-    cleaned = normalize_url(url)
-    features = extract_features(cleaned)
-
-    base_vec = np.array([features[name] for name in FEATURE_NAMES[:BASE_FEATURE_COUNT]])
-
-    if tfidf_vectorizer is not None:
-        tfidf_vec = tfidf_vectorizer.transform([cleaned]).toarray()[0]
-        X = np.concatenate([base_vec, tfidf_vec]).reshape(1, -1)
-    else:
-        X = base_vec.reshape(1, -1)
-
-    return cleaned, features, X
+def require_model():
+    if model is None:
+        raise HTTPException(status_code=503, detail="Model not loaded. Train the model first.")
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "model": "xgboost"}
+    return {"status": "ok", "model": "xgboost", "model_loaded": model is not None}
 
 
 @app.get("/result/{result_id}")
@@ -150,141 +236,137 @@ def get_result(result_id: str):
     entry = results_store.get(result_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Result not found or expired")
-    result = {k: v for k, v in entry.items() if k != "_ts"}
-    return result
-
-
-def _predict_url(data: URLRequest) -> dict:
-    cleaned, features, X = get_features_for_url(data.url)
-    prob = model.predict_proba(X)[0][1]
-    prediction = int(prob > THRESHOLD)
-    status = "phishing" if prediction == 1 else "legitimate"
-    tier = tier_from_score(prob)
-    result_id = make_result_id(cleaned)
-
-    result = {
-        "result_id": result_id,
-        "url": data.url,
-        "normalized_url": cleaned,
-        "is_phishing": status,
-        "tier": tier,
-        "confidence": float(prob),
-    }
-    results_store[result_id] = {**result, "_ts": time.time()}
-    return result
+    return {k: v for k, v in entry.items() if k != "_ts"}
 
 
 @app.post("/predict")
-@limiter.limit("20/minute")
-def predict(request: Request, data: URLRequest):
-    try:
-        return _predict_url(data)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@limiter.limit(RATE_LIMIT)
+async def predict(request: Request, data: URLRequest):
+    require_model()
+    cleaned = normalize_url(data.url)
+
+    def stage1():
+        _, features, X = get_features_for_url(cleaned)
+        conf = float(model.predict_proba(X)[0][1])
+        return features, conf
+
+    stage1_task = asyncio.to_thread(stage1)
+    fetch_task = asyncio.to_thread(fetch_page, cleaned)
+    (features, xgb_conf), page = await asyncio.gather(stage1_task, fetch_task)
+
+    content_confidence = None
+    content_reasons_list = []
+    if page["fetched"]:
+        content_result = compute_content_score(page["soup"], page["domain"], page["html"])
+        content_confidence = content_result["score"]
+        content_reasons_list = content_reasons(content_result)
+        final_score = fuse_stage1_stage2(xgb_conf, content_confidence)["score"]
+    else:
+        final_score = xgb_conf
+
+    reasons = url_structure_reasons(features) + content_reasons_list
+
+    result = {
+        "result_id": make_result_id(cleaned),
+        "url": data.url,
+        "normalized_url": cleaned,
+        "tier": decide_tier(final_score),
+        "confidence": float(final_score),
+        "xgb_confidence": xgb_conf,
+        "content_confidence": content_confidence,
+        "fetched_page": bool(page["fetched"]),
+        "reasons": reasons,
+    }
+    store_result(result)
+    return result
 
 
 @app.post("/predict-fast")
-@limiter.limit("20/minute")
-def predict_fast(request: Request, data: URLRequest):
-    try:
-        return _predict_url(data)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@limiter.limit(RATE_LIMIT)
+async def predict_fast(request: Request, data: URLRequest):
+    require_model()
+    cleaned, features, X = await asyncio.to_thread(get_features_for_url, data.url)
+    xgb_conf = float(model.predict_proba(X)[0][1])
+
+    result = {
+        "result_id": make_result_id(cleaned),
+        "url": data.url,
+        "normalized_url": cleaned,
+        "tier": decide_tier(xgb_conf),
+        "confidence": xgb_conf,
+        "xgb_confidence": xgb_conf,
+        "content_confidence": None,
+        "fetched_page": False,
+        "reasons": url_structure_reasons(features),
+    }
+    store_result(result)
+    return result
 
 
 @app.post("/explain")
-@limiter.limit("20/minute")
-def explain(request: Request, data: URLRequest):
-    try:
-        import shap
+@limiter.limit(RATE_LIMIT)
+async def explain(request: Request, data: URLRequest):
+    require_model()
+    cleaned = normalize_url(data.url)
 
-        cleaned, features, X = get_features_for_url(data.url)
-        xgb_conf = model.predict_proba(X)[0][1]
-        prediction = int(xgb_conf > THRESHOLD)
-        status = "phishing" if prediction == 1 else "legitimate"
+    stage1_task = asyncio.to_thread(get_features_for_url, cleaned)
+    fetch_task = asyncio.to_thread(fetch_page, cleaned)
+    (_, _, X), page = await asyncio.gather(stage1_task, fetch_task)
 
-        explainer = shap.TreeExplainer(model)
-        shap_values = explainer.shap_values(X)
+    def stage1_and_shap():
+        xgb_conf = float(model.predict_proba(X)[0][1])
+        return xgb_conf, shap_breakdown_and_top_reasons(X)
 
-        if isinstance(shap_values, list):
-            sv = shap_values[1][0] if len(shap_values) > 1 else shap_values[0][0]
-        else:
-            sv = shap_values[0]
+    xgb_conf, (feature_breakdown, top_reasons) = await asyncio.to_thread(stage1_and_shap)
 
-        all_feature_names = FEATURE_NAMES
-        contributions = list(zip(all_feature_names, sv))
-        contributions.sort(key=lambda x: abs(x[1]), reverse=True)
+    content_confidence = None
+    content_reasons_list = []
+    if page["fetched"]:
+        content_result = compute_content_score(page["soup"], page["domain"], page["html"])
+        content_confidence = content_result["score"]
+        content_reasons_list = content_reasons(content_result)
+        final_score = fuse_stage1_stage2(xgb_conf, content_confidence)["score"]
+    else:
+        final_score = xgb_conf
 
-        target_sign = 1 if prediction == 1 else -1
-        aligned = [(fname, c) for fname, c in contributions if c * target_sign > 0.001]
+    tier = decide_tier(final_score)
 
-        top_reasons = []
-        for fname, contribution in aligned[:5]:
-            if fname in REASON_TEMPLATES:
-                reason = REASON_TEMPLATES[fname]
-            elif "suspicious" in fname:
-                readable = fname.replace("_", " ")
-                reason = f"The {readable} appears suspicious"
-            elif fname.startswith("tfidf_"):
-                ngram = fname.replace("tfidf_", "")
-                reason = f"The URL contains character pattern '{ngram}' associated with phishing"
-            else:
-                readable = fname.replace("_", " ")
-                reason = f"The {readable} contributed to the prediction"
-            top_reasons.append({"reason": reason, "impact": status})
+    reasons = [
+        {"text": r["reason"], "source": "url_structure", "impact": r["impact"]}
+        for r in top_reasons
+    ] + content_reasons_list
 
-        if not top_reasons and contributions:
-            fname, contribution = contributions[0]
-            impact = "phishing" if contribution > 0 else "legitimate"
-            if fname in REASON_TEMPLATES:
-                reason = REASON_TEMPLATES[fname]
-            else:
-                readable = fname.replace("_", " ")
-                reason = f"The {readable} contributed to the prediction"
-            top_reasons.append({"reason": reason, "impact": impact})
+    deep_confidence = None
+    if tier == "unsure" and page["fetched"] and page["soup"] is not None:
+        page_text = extract_page_text(page["soup"]).get("body", "")
 
-        feature_breakdown = {}
-        for fname, contribution in contributions:
-            feature_breakdown[fname] = {
-                "value": float(features[fname]) if fname in features else 0.0,
-                "contribution": float(contribution),
-            }
+        def llm_call():
+            return analyze_with_llm(cleaned, page_text)
 
-        # Page content analysis
-        page_result = fetch_page(cleaned)
-        fetched_page = page_result["fetched"]
+        llm = await asyncio.to_thread(llm_call)
+        classification = llm.get("classification")
+        if classification in ("phishing", "legitimate"):
+            llm_conf = float(llm.get("confidence", 0.5))
+            deep_confidence = llm_conf if classification == "phishing" else 1.0 - llm_conf
+            fused = fuse_with_llm(final_score, deep_confidence)
+            final_score = fused["score"]
+            tier = decide_tier(final_score)
+            for r in llm.get("reasons", []):
+                reasons.append({"text": r, "source": "deep_analysis", "impact": classification})
 
-        if fetched_page and page_result["soup"] is not None:
-            content_result = compute_content_score(
-                page_result["soup"],
-                page_result["domain"],
-                page_result["html"],
-            )
-            content_score = content_result["score"]
-            final_score = round((xgb_conf + content_score) / 2, 4)
-            content_reasons = content_result["reasons"]
-        else:
-            content_score = None
-            final_score = xgb_conf
-            content_reasons = []
-
-        tier = tier_from_score(final_score)
-
-        result_id = make_result_id(cleaned)
-        result = {
-            "result_id": result_id,
-            "url": data.url,
-            "normalized_url": cleaned,
-            "is_phishing": status,
-            "tier": tier,
-            "confidence": float(final_score),
-            "xgb_confidence": float(xgb_conf),
-            "content_confidence": float(content_score) if content_score is not None else None,
-            "fetched_page": fetched_page,
-            "top_reasons": top_reasons + content_reasons,
-            "feature_breakdown": feature_breakdown,
-        }
-        results_store[result_id] = {**result, "_ts": time.time()}
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    result = {
+        "result_id": make_result_id(cleaned),
+        "url": data.url,
+        "normalized_url": cleaned,
+        "tier": tier,
+        "confidence": float(final_score),
+        "xgb_confidence": xgb_conf,
+        "content_confidence": content_confidence,
+        "fetched_page": bool(page["fetched"]),
+        "reasons": reasons,
+        "deep_confidence": deep_confidence,
+        "feature_breakdown": feature_breakdown,
+        "top_reasons": top_reasons,
+    }
+    store_result(result)
+    return result
