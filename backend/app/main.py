@@ -22,7 +22,23 @@ from backend.app.page_analyzer import compute_content_score, extract_page_text, 
 
 app = FastAPI(title="PhishOrNot API", version="3.0.0")
 
-limiter = Limiter(key_func=get_remote_address)
+
+def rate_limit_key(request: Request) -> str:
+    """Key rate limits by the client IP, not the proxy's.
+
+    Behind a reverse proxy (Render) all traffic shares one remote address,
+    which would throttle the whole API. Take the rightmost X-Forwarded-For
+    entry (closest to the client), falling back to the remote address.
+    """
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        ips = [ip.strip() for ip in forwarded.split(",") if ip.strip()]
+        if ips:
+            return ips[-1]
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=rate_limit_key)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -37,12 +53,10 @@ app.add_middleware(
 MODEL_DIR = Path(__file__).resolve().parent / "models" / "train" / "output_xgb"
 MODEL_PATH = str(MODEL_DIR / "xgboost_url_phishing.joblib")
 FEATURE_NAMES_PATH = str(MODEL_DIR / "feature_names.json")
-TFIDF_PATH = str(MODEL_DIR / "tfidf_vectorizer.joblib")
 METRICS_PATH = str(MODEL_DIR / "test_metrics.json")
 
 model = None
 FEATURE_NAMES: list = []
-tfidf_vectorizer = None
 BASE_FEATURE_COUNT = 0
 
 results_store: dict = {}
@@ -50,7 +64,7 @@ _explainer = None
 
 
 def load_model():
-    global model, FEATURE_NAMES, tfidf_vectorizer, BASE_FEATURE_COUNT
+    global model, FEATURE_NAMES, BASE_FEATURE_COUNT
     try:
         model = joblib.load(MODEL_PATH)
     except FileNotFoundError:
@@ -66,11 +80,7 @@ def load_model():
     except (FileNotFoundError, ValueError):
         pass
     if BASE_FEATURE_COUNT == 0:
-        BASE_FEATURE_COUNT = len([n for n in FEATURE_NAMES if not n.startswith("tfidf_")])
-    try:
-        tfidf_vectorizer = joblib.load(TFIDF_PATH)
-    except FileNotFoundError:
-        tfidf_vectorizer = None
+        BASE_FEATURE_COUNT = len(FEATURE_NAMES)
 
 
 load_model()
@@ -79,20 +89,11 @@ load_model()
 def get_features_for_url(url: str):
     cleaned = normalize_url(url)
     features = extract_features(cleaned)
-    base_vec = np.array([features[name] for name in FEATURE_NAMES[:BASE_FEATURE_COUNT]])
-
-    if tfidf_vectorizer is not None:
-        tfidf_vec = tfidf_vectorizer.transform([cleaned]).toarray()[0]
-        X = np.concatenate([base_vec, tfidf_vec]).reshape(1, -1)
-    else:
-        X = base_vec.reshape(1, -1)
-
+    X = np.array([[features[name] for name in FEATURE_NAMES[:BASE_FEATURE_COUNT]]])
     return cleaned, features, X
 
 
 def model_feature_names() -> list:
-    if tfidf_vectorizer is not None:
-        return FEATURE_NAMES
     return FEATURE_NAMES[:BASE_FEATURE_COUNT]
 
 
@@ -117,9 +118,16 @@ def clean_expired_results():
         del results_store[rid]
 
 
+MAX_STORE_ENTRIES = 1000
+
+
 def store_result(result: dict) -> str:
     rid = result["result_id"]
     results_store[rid] = {**result, "_ts": time.time()}
+    clean_expired_results()
+    while len(results_store) > MAX_STORE_ENTRIES:
+        oldest = min(results_store, key=lambda k: results_store[k]["_ts"])
+        del results_store[oldest]
     return rid
 
 
@@ -257,7 +265,9 @@ async def predict(request: Request, data: URLRequest):
     content_confidence = None
     content_reasons_list = []
     if page["fetched"]:
-        content_result = compute_content_score(page["soup"], page["domain"], page["html"])
+        content_result = await asyncio.to_thread(
+            compute_content_score, page["soup"], page["domain"], page["html"]
+        )
         content_confidence = content_result["score"]
         content_reasons_list = content_reasons(content_result)
         final_score = fuse_stage1_stage2(xgb_conf, content_confidence)["score"]
@@ -322,7 +332,9 @@ async def explain(request: Request, data: URLRequest):
     content_confidence = None
     content_reasons_list = []
     if page["fetched"]:
-        content_result = compute_content_score(page["soup"], page["domain"], page["html"])
+        content_result = await asyncio.to_thread(
+            compute_content_score, page["soup"], page["domain"], page["html"]
+        )
         content_confidence = content_result["score"]
         content_reasons_list = content_reasons(content_result)
         final_score = fuse_stage1_stage2(xgb_conf, content_confidence)["score"]
@@ -338,7 +350,8 @@ async def explain(request: Request, data: URLRequest):
 
     deep_confidence = None
     if tier == "unsure" and page["fetched"] and page["soup"] is not None:
-        page_text = extract_page_text(page["soup"]).get("body", "")
+        page_text = await asyncio.to_thread(extract_page_text, page["soup"])
+        page_text = page_text.get("body", "")
 
         def llm_call():
             return analyze_with_llm(cleaned, page_text)
