@@ -1,4 +1,6 @@
+import ipaddress
 import re
+import socket
 from urllib.parse import urlparse
 
 import httpx
@@ -190,7 +192,41 @@ def compute_content_score(soup, url_domain: str, raw_text: str) -> dict:
     return {"score": score, "signals": signals, "reasons": reasons}
 
 
+def is_private_or_reserved(ip_str: str) -> bool:
+    """Reject private/reserved ranges that are unsafe to fetch server-side."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return True
+    if ip.is_private or ip.is_loopback or ip.is_link_local:
+        return True
+    if ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+        return True
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        return is_private_or_reserved(str(ip.ipv4_mapped))
+    return False
+
+
+def is_safe_fetch_url(url: str) -> bool:
+    """SSRF guard: resolve the hostname and reject private/reserved targets."""
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname
+        if not host:
+            return False
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        return False
+    for info in infos:
+        ip_str = info[4][0]
+        if is_private_or_reserved(ip_str):
+            return False
+    return True
+
+
 def fetch_page(url: str) -> dict:
+    if not is_safe_fetch_url(url):
+        return {"html": None, "soup": None, "domain": None, "fetched": False}
     try:
         with httpx.Client(
             timeout=PAGE_FETCH_TIMEOUT,

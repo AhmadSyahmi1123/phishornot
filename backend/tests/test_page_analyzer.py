@@ -14,6 +14,8 @@ from backend.app.page_analyzer import (
     links_phishing_score,
     structure_phishing_score,
     compute_content_score,
+    is_private_or_reserved,
+    is_safe_fetch_url,
     fetch_page,
 )
 
@@ -135,3 +137,31 @@ def test_compute_content_score_with_brand_mismatch():
     soup = BeautifulSoup(html, "html.parser")
     result = compute_content_score(soup, "paypal-security.com", html)
     assert result["score"] > 0.5
+
+
+def test_is_private_or_reserved():
+    assert is_private_or_reserved("127.0.0.1")
+    assert is_private_or_reserved("169.254.169.254")
+    assert is_private_or_reserved("10.0.0.1")
+    assert is_private_or_reserved("172.16.0.1")
+    assert is_private_or_reserved("192.168.1.1")
+    assert is_private_or_reserved("::1")
+    assert is_private_or_reserved("fc00::1")
+    assert is_private_or_reserved("fe80::1")
+    assert not is_private_or_reserved("8.8.8.8")
+    assert not is_private_or_reserved("1.1.1.1")
+    assert is_private_or_reserved("not-an-ip")
+
+
+def test_is_safe_fetch_url_rejects_loopback():
+    assert not is_safe_fetch_url("http://127.0.0.1:8000/admin")
+    assert not is_safe_fetch_url("http://169.254.169.254/latest/meta-data/")
+    assert not is_safe_fetch_url("http://10.0.0.1/internal")
+    assert not is_safe_fetch_url("http://localhost:8000/predict")
+    assert not is_safe_fetch_url("http://[::1]:8080/")
+    assert is_safe_fetch_url("http://8.8.8.8/")
+
+
+def test_fetch_page_rejects_loopback(monkeypatch):
+    result = fetch_page("http://127.0.0.1:8000/predict")
+    assert result == {"html": None, "soup": None, "domain": None, "fetched": False}
