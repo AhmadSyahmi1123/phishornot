@@ -42,3 +42,15 @@ Full suite: 72 passed, 2 skipped (2 skips are pre-existing model-training tests)
 2. `tfidf_` character-ngram features dominate SHAP top reasons (e.g., pattern `s:/` which appears in every URL's scheme). Could be mitigated by excluding scheme-ngrams in the vectorizer or weighting base features higher.
 3. In-memory results store is per-process — results are lost on restart (acceptable per spec; a shared cache would be needed for multi-worker deployments).
 4. Slowapi counts 422 validation errors against the rate limit — 20/min is modest for a real deployment.
+
+## Review fix: deep_analysis impact mapping
+
+**What I fixed:** In `/explain` (backend/app/main.py:354-357), `deep_analysis` reasons previously used the raw LLM classification (`"legitimate"`/`"phishing"`) as the `impact` field. The reasons schema contract requires `impact` ∈ {`"safe"`, `"phishing"`}. Now the classification is mapped: `"legitimate"` → `"safe"`, anything else → `"phishing"`.
+
+**Test results:**
+
+```
+backend/tests/test_api.py ............ 12 passed in 29.89s
+```
+
+**Commit:** `345bb1c` — fix: map LLM legitimate classification to safe impact
