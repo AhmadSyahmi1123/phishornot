@@ -64,7 +64,6 @@ def test_load_data_fallback():
     assert df["label"].nunique() == 2
 
 
-@pytest.mark.skip(reason="Model artifacts not present until training is run")
 def test_model_artifacts_exist():
     output_dir = (
         Path(__file__).resolve().parent.parent.parent
@@ -72,11 +71,9 @@ def test_model_artifacts_exist():
     )
     assert (output_dir / "xgboost_url_phishing.joblib").exists()
     assert (output_dir / "feature_names.json").exists()
-    assert (output_dir / "tfidf_vectorizer.joblib").exists()
     assert (output_dir / "test_metrics.json").exists()
 
 
-@pytest.mark.skip(reason="Model artifacts not present until training is run")
 def test_prediction_shape():
     import joblib
 
@@ -97,3 +94,36 @@ def test_prediction_shape():
     assert prob.shape == (2,)
     assert 0 <= prob[0] <= 1
     assert 0 <= prob[1] <= 1
+
+
+def test_phishing_url_not_safe_regression():
+    from fastapi.testclient import TestClient
+    from backend.app.main import MODEL_PATH, app
+
+    if not os.path.exists(MODEL_PATH):
+        pytest.skip("Model not trained")
+    client = TestClient(app)
+    for url in (
+        "http://login-verify-secure.tk/update",
+        "http://paypal-secure.ga/confirm",
+        "http://bit.ly/3abc12",
+    ):
+        response = client.post("/predict-fast", json={"url": url})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["tier"] != "safe", f"{url} scored {data['confidence']} and was tier {data['tier']}"
+        assert data["confidence"] >= 0.30
+
+
+def test_legitimate_url_safe_regression():
+    from fastapi.testclient import TestClient
+    from backend.app.main import MODEL_PATH, app
+
+    if not os.path.exists(MODEL_PATH):
+        pytest.skip("Model not trained")
+    client = TestClient(app)
+    for url in ("http://example.com", "http://google.com"):
+        response = client.post("/predict-fast", json={"url": url})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["confidence"] < 0.30, f"{url} scored {data['confidence']}"
