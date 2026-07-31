@@ -8,84 +8,154 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     roc_auc_score, precision_recall_curve, confusion_matrix,
 )
-from sklearn.calibration import CalibratedClassifierCV
 from xgboost import XGBClassifier
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-from extract_feature import extract_features, normalize_url
+from extract_feature import (
+    SUSPICIOUS_TLDS,
+    SUSPICIOUS_WORDS,
+    extract_features,
+    normalize_url,
+)
 
-DATA_DIR = Path(__file__).resolve().parent / "data"
+DATA_DIR = Path(__file__).resolve().parent / "datasets"
+LEGACY_DATA_DIR = Path(__file__).resolve().parent / "data"
 OUTPUT_DIR = Path(__file__).resolve().parent / "output_xgb"
 
+URL_COLUMN_CANDIDATES = ["url", "URL", "domain", "Domain"]
+LABEL_COLUMN_CANDIDATES = ["label", "class", "type"]
+
+MAX_ROWS_PER_FILE = 300000
+
 XGB_PARAMS = {
-    "n_estimators": 300,
-    "max_depth": 6,
+    "n_estimators": 100,
+    "max_depth": 4,
     "learning_rate": 0.1,
     "subsample": 0.8,
     "colsample_bytree": 0.8,
+    "min_child_weight": 5,
+    "gamma": 0.2,
+    "reg_lambda": 2.0,
     "random_state": 42,
     "eval_metric": "logloss",
-}
-
-TFIDF_PARAMS = {
-    "analyzer": "char",
-    "ngram_range": (3, 5),
-    "max_features": 200,
-    "sublinear_tf": True,
 }
 
 RANDOM_STATE = 42
 
 
+def _label_orientation_hints(urls: pd.Series) -> int:
+    """Count phishing-ish signals in a set of URLs (suspicious TLDs, keywords, raw IPs).
+
+    Used to detect datasets whose label column is inverted (label=0 = phishing).
+    """
+    urls = urls.str.lower()
+    tld_hits = urls.str.extract(r"\.([a-z]{2,24})\s*$")[0].isin(SUSPICIOUS_TLDS).sum()
+    word_hits = urls.str.contains("|".join(SUSPICIOUS_WORDS), regex=True).sum()
+    ip_hits = urls.str.contains(r"//\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", regex=True).sum()
+    return int(tld_hits) + int(word_hits) + int(ip_hits)
+
+
+def _orient_labels(df: pd.DataFrame) -> pd.DataFrame:
+    """Force the internal convention label=1 == phishing.
+
+    Several CSVs in datasets/ ship with inverted labels (0=phishing, 1=legit).
+    Compare the phishing-signal density per class; if the label=1 class looks
+    cleaner than the label=0 class, swap the labels.
+    """
+    df = df.copy()
+    if len(df) < 10 or df["label"].nunique() < 2:
+        return df
+    hints_0 = _label_orientation_hints(df.loc[df["label"] == 0, "url"])
+    hints_1 = _label_orientation_hints(df.loc[df["label"] == 1, "url"])
+    if hints_1 < hints_0:
+        print("    labels appear inverted (label=1 is the clean class) - flipping")
+        df["label"] = 1 - df["label"]
+    return df
+
+
+def _load_single_csv(path: Path) -> pd.DataFrame | None:
+    """Parse one CSV into (url, label) rows with label=1 == phishing.
+
+    Tries known url/label column names, skips files that can't be parsed
+    (e.g. pre-extracted feature CSVs without a url column).
+    """
+    try:
+        df = pd.read_csv(path, nrows=MAX_ROWS_PER_FILE)
+    except Exception:
+        return None
+    url_col = next((c for c in URL_COLUMN_CANDIDATES if c in df.columns), None)
+    if url_col is None:
+        return None
+    label_col = next((c for c in LABEL_COLUMN_CANDIDATES if c in df.columns), None)
+    if label_col is None:
+        return None
+    try:
+        df = df[[url_col, label_col]].rename(columns={url_col: "url", label_col: "label"})
+        df = df.dropna()
+        df["url"] = df["url"].astype(str).str.strip()
+        df["label"] = pd.to_numeric(df["label"], errors="coerce").astype("Int64")
+    except Exception:
+        return None
+    df = df[df["label"].isin([0, 1])]
+    df["label"] = df["label"].astype(int)
+    df = df[df["url"].str.len() > 0]
+    df = df[df["url"].str.startswith(("http://", "https://"))]
+    if df.empty:
+        return None
+    return _orient_labels(df)
+
+
 def load_data():
-    phishtank_path = DATA_DIR / "phishtank.csv"
-    tranco_path = DATA_DIR / "tranco_list.csv"
-    openphish_path = DATA_DIR / "openphish.txt"
+    frames = []
 
-    urls = []
-    labels = []
+    for path in sorted(DATA_DIR.glob("*.csv")):
+        df = _load_single_csv(path)
+        if df is not None:
+            print(f"  loaded {path.name}: {len(df)} rows")
+            frames.append(df)
+        else:
+            print(f"  skipped {path.name} (no url/label columns or unparsable)")
 
-    if phishtank_path.exists():
-        df = pd.read_csv(phishtank_path)
-        url_col = None
-        for col in ["url", "URL", "phish_url", "phishing_url"]:
-            if col in df.columns:
-                url_col = col
-                break
-        if url_col is not None:
-            phish_urls = df[url_col].dropna().astype(str).tolist()
-            urls.extend(phish_urls)
-            labels.extend([1] * len(phish_urls))
+    for path in sorted(LEGACY_DATA_DIR.glob("*.csv")):
+        df = _load_single_csv(path)
+        if df is not None:
+            print(f"  loaded {path.name}: {len(df)} rows")
+            frames.append(df)
 
+    openphish_path = LEGACY_DATA_DIR / "openphish.txt"
     if openphish_path.exists():
-        with open(openphish_path, "r") as f:
+        with open(openphish_path, "r", encoding="utf-8", errors="ignore") as f:
             phish_urls = [line.strip() for line in f if line.strip()]
-        urls.extend(phish_urls)
-        labels.extend([1] * len(phish_urls))
+        if phish_urls:
+            frames.append(pd.DataFrame({"url": phish_urls, "label": [1] * len(phish_urls)}))
+            print(f"  loaded openphish.txt: {len(phish_urls)} rows")
 
+    tranco_path = LEGACY_DATA_DIR / "tranco_list.csv"
     if tranco_path.exists():
-        df = pd.read_csv(tranco_path, header=None, nrows=50000)
-        cols = df.columns.tolist()
-        domain_col = cols[1] if len(cols) > 1 else cols[0]
-        domains = []
-        for val in df[domain_col].dropna().astype(str):
-            if not val.startswith("http"):
-                domains.append("https://" + val)
-            else:
-                domains.append(val)
-        urls.extend(domains)
-        labels.extend([0] * len(domains))
+        try:
+            df = pd.read_csv(tranco_path, header=None, nrows=50000)
+            cols = df.columns.tolist()
+            domain_col = cols[1] if len(cols) > 1 else cols[0]
+            domains = []
+            for val in df[domain_col].dropna().astype(str):
+                if not val.startswith("http"):
+                    domains.append("https://" + val)
+                else:
+                    domains.append(val)
+            frames.append(pd.DataFrame({"url": domains, "label": [0] * len(domains)}))
+            print(f"  loaded tranco_list.csv: {len(domains)} rows")
+        except Exception:
+            pass
 
-    if len(urls) == 0:
+    if len(frames) == 0:
         print("No data files found. Generating synthetic data...")
         return _generate_synthetic_data()
 
-    df = pd.DataFrame({"url": urls, "label": labels})
+    df = pd.concat(frames, ignore_index=True)
     df = df.drop_duplicates(subset="url").reset_index(drop=True)
     return df
 
@@ -154,38 +224,24 @@ def main():
     X_feat = pd.DataFrame(feature_list)
     y = df["label"].values
 
-    print("Fitting TF-IDF vectorizer on URLs...")
-    vectorizer = TfidfVectorizer(**TFIDF_PARAMS)
-    urls_clean = df["url"].str.lower().fillna("")
-    X_tfidf = vectorizer.fit_transform(urls_clean).toarray()
-    print(f"TF-IDF features: {X_tfidf.shape[1]}")
-
-    X = np.hstack([X_feat.values, X_tfidf])
-    feature_names = list(X_feat.columns) + [f"tfidf_{i}" for i in range(X_tfidf.shape[1])]
+    X = X_feat.values
+    feature_names = list(X_feat.columns)
     print(f"Total features: {len(feature_names)}")
 
     print("Splitting data...")
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, stratify=y, random_state=RANDOM_STATE
     )
-    X_train_sub, X_calib, y_train_sub, y_calib = train_test_split(
-        X_train, y_train, test_size=0.15, stratify=y_train, random_state=RANDOM_STATE
-    )
-    print(f"Train: {X_train_sub.shape[0]}, Calib: {X_calib.shape[0]}, Test: {X_test.shape[0]}")
+    print(f"Train: {X_train.shape[0]}, Test: {X_test.shape[0]}")
 
     print("Training XGBoost...")
     xgb = XGBClassifier(**XGB_PARAMS)
-    xgb.fit(X_train_sub, y_train_sub)
-    train_score = xgb.score(X_train_sub, y_train_sub)
-    calib_score = xgb.score(X_calib, y_calib)
-    print(f"XGBoost train acc: {train_score:.4f}, calib acc: {calib_score:.4f}")
-
-    print("Calibrating with Platt scaling...")
-    calibrator = CalibratedClassifierCV(xgb, method="sigmoid", cv="prefit")
-    calibrator.fit(X_calib, y_calib)
+    xgb.fit(X_train, y_train)
+    train_score = xgb.score(X_train, y_train)
+    print(f"XGBoost train acc: {train_score:.4f}")
 
     print("Finding optimal threshold via precision-recall...")
-    y_proba = calibrator.predict_proba(X_test)[:, 1]
+    y_proba = xgb.predict_proba(X_test)[:, 1]
     precisions, recalls, thresholds = precision_recall_curve(y_test, y_proba)
     f1_scores = 2 * (precisions * recalls) / (precisions + recalls + 1e-10)
     best_idx = int(np.argmax(f1_scores))
@@ -210,12 +266,8 @@ def main():
 
     print("Saving artifacts...")
     model_path = OUTPUT_DIR / "xgboost_url_phishing.joblib"
-    joblib.dump(calibrator, model_path)
-    print(f"Calibrated model saved to: {model_path}")
-
-    vec_path = OUTPUT_DIR / "tfidf_vectorizer.joblib"
-    joblib.dump(vectorizer, vec_path)
-    print(f"TF-IDF vectorizer saved to: {vec_path}")
+    joblib.dump(xgb, model_path)
+    print(f"Model saved to: {model_path}")
 
     feat_path = OUTPUT_DIR / "feature_names.json"
     with open(feat_path, "w") as f:
@@ -234,6 +286,8 @@ def main():
         "n_train": int(len(y_train)),
         "n_test": int(len(y_test)),
         "n_features": int(len(feature_names)),
+        "base_feature_count": int(X_feat.shape[1]),
+        "tfidf_feature_count": 0,
     }
     metrics_path = OUTPUT_DIR / "test_metrics.json"
     with open(metrics_path, "w") as f:
