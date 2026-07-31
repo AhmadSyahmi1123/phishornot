@@ -10,5 +10,3 @@ beautifulsoup4
 tldextract
 shap
 slowapi
-pytest
-google-generativeai

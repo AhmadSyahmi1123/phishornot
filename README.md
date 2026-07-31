@@ -1,43 +1,52 @@
 # phishornot
 
-A phishing URL detection application powered by **XGBoost**. Analyzes URL features — structure, entropy, suspicious keywords, TLDs, shorteners, and more — to classify URLs as phishing or legitimate with explainable predictions via SHAP.
+A phishing URL detector built around a **3-stage pipeline**:
+
+1. **Stage 1 — URL features (XGBoost):** 54 structural features (length, entropy, suspicious words, TLDs, shorteners, IP addresses, subdomain structure, unicode/homograph signals) classified by a trained XGBoost model.
+2. **Stage 2 — Page content heuristics:** if the page can be fetched, analyze brand-vs-content similarity, login-form destinations, link distribution, and page structure for phishing signals.
+3. **Stage 3 — Optional deep analysis (LLM):** for "unsure" results, a Gemini model (raw `httpx`, no SDK) reviews the page text.
+
+Results are reported as a **3-tier verdict** with a confidence score:
+
+| Tier | Confidence |
+|------|------------|
+| `safe` | `< 0.30` |
+| `unsure` | `0.30 – 0.70` |
+| `phishing` | `> 0.70` |
 
 ## Features
 
-- URL feature extraction (length, digits, special chars, subdomains, entropy, etc.)
-- XGBoost-based classification with confidence scores
+- XGBoost classification with calibrated confidence scoring (target >0.95 AUC)
 - SHAP explainability — see why a URL was flagged
-- Rate-limited API (60 req/min per IP)
-- Input validation with clear error messages
+- Server-side fetch with an **SSRF guard** (private/reserved IPs rejected)
+- Proxy-aware rate limiting (`X-Forwarded-For` client IP, not the proxy IP)
+- Optional Gemini deep analysis via `LLM_API_KEY`
 - CORS-enabled for frontend integration
 
 ## Tech Stack
 
 - **Backend:** Python, FastAPI, Uvicorn
-- **Model:** XGBoost, joblib
+- **Model:** XGBoost, joblib, scikit-learn
 - **Explainability:** SHAP (TreeExplainer)
-- **Rate Limiting:** slowapi (Redis-less in-memory)
+- **Rate Limiting:** slowapi (in-memory)
+- **Page analysis:** httpx, BeautifulSoup, tldextract
 - **Validation:** Pydantic v2
-- **Testing:** pytest, httpx
+- **Testing:** pytest (see `requirements-dev.txt`)
+- **Frontend:** React + Vite
 
 ## Setup
 
-### 1. Clone the repository
+### 1. Install dependencies
 
 ```bash
-git clone https://github.com/your-username/phishornot.git
-cd phishornot
-```
-
-### 2. Install dependencies
-
-```bash
+# production dependencies
 pip install -r requirements.txt
+
+# dev/test dependencies (pytest)
+pip install -r requirements-dev.txt
 ```
 
-Required packages: `fastapi`, `uvicorn`, `xgboost`, `joblib`, `numpy`, `pydantic`, `python-multipart`, `aiofiles`, `python-whois`, `dnspython`, `tldextract`, `shap`, `slowapi`
-
-### 3. Run the backend
+### 2. Run the backend
 
 ```bash
 uvicorn backend.app.main:app --reload --port 8000
@@ -45,114 +54,91 @@ uvicorn backend.app.main:app --reload --port 8000
 
 The API will be available at `http://localhost:8000`.
 
-### 4. Run the frontend (if applicable)
+Optional environment variables:
+
+- `LLM_API_KEY` — Google Generative Language API key; enables stage-3 deep analysis of "unsure" results.
+
+### 3. Run the frontend
 
 ```bash
-# Navigate to frontend directory and follow its setup instructions
 cd frontend
+npm install
+npm run dev
 ```
 
-## API Documentation
+The frontend reads the backend base URL from `VITE_API_BASE`:
+
+- Development default: `http://localhost:8000`
+- **Production:** set `VITE_API_BASE` to your deployed backend URL. `frontend/.env.production` already points at the placeholder Render backend — update it to the real URL at deploy time, or pass the env var to the build (`VITE_API_BASE=https://your-backend.example.com npm run build`). A relative path (e.g. `/api`) will NOT work because the backend is deployed separately.
+
+## API
 
 ### `GET /health`
 
 Check API and model status.
 
-**Response:**
-```json
-{
-  "status": "ok",
-  "model": "xgboost"
-}
-```
-
 ### `POST /predict`
 
-Classify a URL as phishing or legitimate.
+Full analysis: URL features + page content (fetched server-side).
 
-**Request:**
 ```json
 {
-  "url": "http://example.com"
+  "url": "http://login-verify-secure.tk/update"
 }
 ```
 
-**Response:**
 ```json
 {
   "result_id": "a1b2c3d4e5f6g7h8",
-  "url": "http://example.com",
-  "normalized_url": "http://example.com",
-  "is_phishing": "legitimate",
-  "confidence": 0.02
+  "url": "http://login-verify-secure.tk/update",
+  "tier": "phishing",
+  "confidence": 0.9995,
+  "xgb_confidence": 0.9995,
+  "content_confidence": null,
+  "fetched_page": false,
+  "reasons": [{ "text": "...", "source": "url_structure", "impact": "phishing" }]
 }
 ```
 
-**Error (422 — invalid URL):**
-```json
-{
-  "detail": [
-    {
-      "type": "value_error",
-      "loc": ["body", "url"],
-      "msg": "Value error, URL must not be empty"
-    }
-  ]
-}
-```
+### `POST /predict-fast`
+
+Stage-1 only (URL features, no page fetch) — fast, no network.
 
 ### `POST /explain`
 
-Get a detailed SHAP-based explanation for a URL prediction.
+Full analysis + SHAP feature breakdown and top reasons; runs stage-3 LLM analysis when the fused score is "unsure".
 
-**Request:** Same as `/predict`
+### `GET /result/{result_id}`
 
-**Response:**
-```json
-{
-  "result_id": "b2c3d4e5f6g7h8i9",
-  "url": "http://login-verify.xyz.tk",
-  "is_phishing": "phishing",
-  "confidence": 0.98,
-  "top_reasons": [
-    {"reason": "The URL uses a suspicious top-level domain", "impact": "phishing"},
-    {"reason": "The URL contains suspicious keywords like 'login' and 'verify'", "impact": "phishing"}
-  ],
-  "feature_breakdown": {
-    "url_length": {"value": 45, "contribution": 0.12},
-    "has_suspicious_word": {"value": 1, "contribution": 0.35}
-  }
-}
-```
+Fetch a stored result (results expire after 1 hour; the in-memory store is capped at 1000 entries).
 
 ## Training Pipeline
 
-The model is trained using features extracted from phishing and legitimate URLs.
+Source: `backend/app/models/train/main.py`
 
-Training source: `backend/app/models/train/main.py`
-
-Key outputs:
-- `backend/app/models/train/output_xgb/xgboost_url_phishing.joblib` — trained model
-- `backend/app/models/train/output_xgb/feature_names.json` — feature order (critical for correct predictions)
+Input CSVs live in `backend/app/models/train/datasets/`. `load_data()` scans the directory, auto-detects url/label columns (`url`/`URL`/`domain` × `label`/`class`/`type`), skips files that can't be parsed (e.g. pre-extracted feature CSVs without a url column), and falls back to synthetic data if nothing loads. Datasets with inverted labels (label=1 = clean) are detected heuristically and flipped so label=1 always means phishing.
 
 To retrain:
+
 ```bash
 cd backend/app/models/train
 python main.py
 ```
 
+Key outputs (all git-tracked):
+
+- `output_xgb/xgboost_url_phishing.joblib` — trained XGBClassifier
+- `output_xgb/feature_names.json` — feature order (critical for correct predictions)
+- `output_xgb/test_metrics.json` — holdout AUC/accuracy/threshold
+
 ## Testing
 
 ```bash
-pytest backend/tests/ -v
+cd backend
+pytest tests/ -v
 ```
 
-Tests cover:
-- Feature extraction correctness (suspicious words, shorteners, TLDs, entropy, etc.)
-- API validation (empty URLs, missing scheme, invalid URLs)
-- Predict and explain endpoints
-- SHAP explanation structure
-- Health check
+Tests cover feature extraction, API validation, predict/explain endpoints, model artifact shape + behavioral regressions (phishing URLs must not be "safe"), page-content heuristics, and the SSRF guard.
 
 ## License
 
