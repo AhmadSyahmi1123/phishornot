@@ -1,252 +1,222 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Routes, Route, useSearchParams, Navigate } from 'react-router-dom'
-import NavBar from './components/NavBar'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { FishSimple, SpinnerGap, WarningCircle } from '@phosphor-icons/react'
+import UrlInput from './components/UrlInput'
 import ResultCard from './components/ResultCard'
 import HistoryPanel from './components/HistoryPanel'
 import Dashboard from './components/Dashboard'
 
-const API_BASE = import.meta.env.VITE_API_URL || '/api'
-console.log('API_BASE:', API_BASE)
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+const HISTORY_KEY = 'phishornot_history'
+const MAX_HISTORY = 50
 
 function loadHistory() {
   try {
-    return JSON.parse(localStorage.getItem('phishornot_history') || '[]')
+    const parsed = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')
+    return Array.isArray(parsed) ? parsed : []
   } catch {
     return []
   }
 }
 
 function saveHistory(history) {
-  localStorage.setItem('phishornot_history', JSON.stringify(history))
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history))
+  } catch {
+    // storage full or unavailable — history stays in memory
+  }
 }
 
-function CheckPage({ history, onNewResult }) {
-  const [url, setUrl] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState(null)
-  const [resultId, setResultId] = useState(null)
-  const [error, setError] = useState(null)
-  const [searchParams] = useSearchParams()
-
-  const loadSharedResult = useCallback(async () => {
-    const sharedId = searchParams.get('result')
-    if (!sharedId) return
-    const items = loadHistory()
-    let found = items.find((item) => item.server_id === sharedId || item.id === sharedId)
-    if (found) {
-      setResult(found)
-      setResultId(found.server_id || found.id)
-      return
-    }
-    try {
-      const res = await fetch(`${API_BASE}/result/${sharedId}`)
-      if (res.ok) {
-        const data = await res.json()
-        setResult(data)
-        setResultId(sharedId)
-      }
-    } catch {
-      // backend unreachable
-    }
-  }, [searchParams])
-
-  useEffect(() => {
-    loadSharedResult()
-  }, [loadSharedResult])
-
-  const handleCheck = async (e) => {
-    e.preventDefault()
-    if (!url.trim()) return
-
-    setLoading(true)
-    setResult(null)
-    setResultId(null)
-    setError(null)
-
-    let explainData, predictData
-
-    try {
-      const explainRes = await fetch(`${API_BASE}/explain`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim() }),
-      })
-      if (explainRes.ok) {
-        explainData = await explainRes.json()
-      } else {
-        throw new Error(`Explain failed: ${explainRes.status}`)
-      }
-    } catch {
-      try {
-        const predictRes = await fetch(`${API_BASE}/predict`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: url.trim() }),
-        })
-        if (!predictRes.ok) throw new Error(`Predict failed: ${predictRes.status}`)
-        predictData = await predictRes.json()
-      } catch (err) {
-        setError(err.message)
-        setLoading(false)
-        return
-      }
-    }
-
-    const data = explainData || predictData
-    const serverId = data.result_id
-    const resultData = {
-      id: serverId,
-      server_id: serverId,
-      url: url.trim(),
-      tier: data.tier,
-      is_phishing: data.is_phishing,
-      confidence: data.confidence,
-      xgb_confidence: data.xgb_confidence ?? data.confidence,
-      content_confidence: data.content_confidence,
-      fetched_page: data.fetched_page ?? false,
-      top_reasons: data.top_reasons || [],
-      features: data.feature_breakdown || data.features || null,
-      timestamp: Date.now(),
-    }
-
-    setResult(resultData)
-    setResultId(serverId)
-    onNewResult(resultData)
-    setLoading(false)
-  }
-
-  return (
-    <div className="space-y-8">
-      {/* Hero */}
-      {!result && !loading && !error && (
-        <div className="text-center pt-8 pb-4">
-          <h2 className="text-4xl sm:text-5xl font-bold text-[#F8FAFC] tracking-tight leading-tight">
-            Is this URL safe?
-          </h2>
-          <p className="mt-3 text-lg text-text-muted max-w-lg mx-auto">
-            Paste a link below and we'll analyze it for phishing, scams, and suspicious activity.
-          </p>
-        </div>
-      )}
-
-      {/* Input Form */}
-      <form onSubmit={handleCheck} className="flex gap-3 max-w-2xl mx-auto">
-        <input
-          type="text"
-          placeholder="https://example.com"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          className="flex-1 bg-surface border border-border rounded-xl px-5 py-3.5 text-[#F8FAFC] placeholder-text-muted focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/30 motion-safe:transition-all duration-150 text-base"
-        />
-        <button
-          type="submit"
-          disabled={loading || !url.trim()}
-          className="px-6 py-3.5 bg-accent hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed text-[#0F172A] rounded-xl font-semibold motion-safe:transition-all duration-150 motion-safe:active:scale-[0.98] cursor-pointer focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:outline-none"
-        >
-          {loading ? (
-            <span className="flex items-center gap-2">
-              <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Checking...
-            </span>
-          ) : (
-            'Check URL'
-          )}
-        </button>
-      </form>
-
-      {/* Error */}
-      {error && (
-        <div className="max-w-2xl mx-auto bg-destructive-muted border border-destructive/30 rounded-xl p-4 text-destructive text-sm motion-safe:animate-[fadeIn_200ms_ease]">
-          {error}
-        </div>
-      )}
-
-      {/* Loading */}
-      {loading && (
-        <div className="flex flex-col items-center py-16 text-text-muted motion-safe:animate-[fadeIn_200ms_ease]">
-          <svg className="animate-spin w-8 h-8 mb-4 text-accent" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
-          <span className="text-sm">Analyzing URL...</span>
-        </div>
-      )}
-
-      {/* Result */}
-      {result && !loading && (
-        <div className="motion-safe:animate-[fadeInSlideUp_300ms_ease]">
-          <ResultCard result={result} resultId={resultId} />
-        </div>
-      )}
-
-      {!result && !loading && !error && (
-        <div className="text-center py-8 text-text-muted">
-          <p className="text-sm">Your results and browsing history are stored locally.</p>
-        </div>
-      )}
-
-      {/* Keyframe for fade-in */}
-      <style>{`
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        @keyframes fadeInSlideUp {
-          from { opacity: 0; transform: translateY(8px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-      `}</style>
-    </div>
-  )
+function toSnapshot(data) {
+  const snapshot = { ...data }
+  delete snapshot.feature_breakdown
+  return snapshot
 }
 
 export default function App() {
+  const [url, setUrl] = useState('')
+  const [result, setResult] = useState(null)
+  const [resultId, setResultId] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
   const [history, setHistory] = useState(loadHistory)
+  const lastRequested = useRef(null)
 
-  const addResult = (resultData) => {
-    const updated = [resultData, ...history]
-    setHistory(updated)
-    saveHistory(updated)
-  }
+  useEffect(() => {
+    saveHistory(history)
+  }, [history])
 
-  const clearHistory = () => {
-    setHistory([])
-    saveHistory([])
-  }
-
-  const selectHistoryItem = (id) => {
-    const item = history.find((h) => h.id === id)
-    if (item) {
-      window.location.href = `/?result=${id}`
+  useEffect(() => {
+    const sharedId = new URLSearchParams(window.location.search).get('result')
+    if (!sharedId) return
+    const found = loadHistory().find((h) => h.id === sharedId || h.server_id === sharedId)
+    if (found?.data) {
+      setResult(found.data)
+      setResultId(found.server_id || found.id)
+      return
     }
-  }
+    let cancelled = false
+    fetch(`${API_BASE}/result/${sharedId}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('not found'))))
+      .then((data) => {
+        if (!cancelled) {
+          setResult(data)
+          setResultId(sharedId)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setError('Shared result not found or expired.')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const runCheck = useCallback(
+    async (target) => {
+      const cleanUrl = target.trim()
+      if (!cleanUrl || loading) return
+      lastRequested.current = null
+      setLoading(true)
+      setError(null)
+      setResult(null)
+      setResultId(null)
+
+      let data = null
+      try {
+        const explainRes = await fetch(`${API_BASE}/explain`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: cleanUrl }),
+        })
+        if (explainRes.ok) {
+          data = await explainRes.json()
+        } else {
+          const predictRes = await fetch(`${API_BASE}/predict`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: cleanUrl }),
+          })
+          if (!predictRes.ok) {
+            throw new Error(`API error (${predictRes.status}). Please try again.`)
+          }
+          data = await predictRes.json()
+        }
+      } catch (err) {
+        setError(err.message || 'Could not reach the analysis service.')
+        setLoading(false)
+        return
+      }
+
+      const entry = {
+        id: data.result_id,
+        server_id: data.result_id,
+        url: cleanUrl,
+        tier: data.tier,
+        confidence: data.confidence,
+        timestamp: Date.now(),
+        data: toSnapshot(data),
+      }
+
+      setResult(data)
+      setResultId(data.result_id)
+      setHistory((prev) => [entry, ...prev].slice(0, MAX_HISTORY))
+      setLoading(false)
+    },
+    [loading],
+  )
+
+  const handleSubmit = useCallback(
+    (e) => {
+      e.preventDefault()
+      if (!url.trim() || loading) return
+      runCheck(url)
+    },
+    [url, loading, runCheck],
+  )
+
+  const selectHistoryItem = useCallback(
+    (id) => {
+      const item = history.find((h) => h.id === id || h.server_id === id)
+      if (!item) return
+      const serverId = item.server_id || item.id
+      lastRequested.current = serverId
+      setUrl(item.url)
+      setError(null)
+      if (item.data) {
+        setResult(item.data)
+        setResultId(serverId)
+      } else {
+        setResult(null)
+        setResultId(null)
+      }
+      fetch(`${API_BASE}/result/${serverId}`)
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error('not found'))))
+        .then((data) => {
+          if (lastRequested.current === serverId) {
+            setResult(data)
+            setResultId(serverId)
+          }
+        })
+        .catch(() => {
+          // backend unreachable or expired — keep the stored snapshot
+        })
+    },
+    [history],
+  )
+
+  const clearHistory = useCallback(() => {
+    setHistory([])
+  }, [])
 
   return (
-    <div className="min-h-screen bg-[#0F172A] text-[#F8FAFC]">
-      <NavBar />
-      <main className="w-full px-4 sm:px-6 lg:px-8 py-8 max-w-7xl mx-auto">
-        <Routes>
-          <Route path="/" element={<CheckPage history={history} onNewResult={addResult} />} />
-          <Route
-            path="/history"
-            element={
-              <HistoryPanel
-                history={history}
-                onSelect={selectHistoryItem}
-                onClear={clearHistory}
-              />
-            }
-          />
-          <Route
-            path="/dashboard"
-            element={<Dashboard history={history} />}
-          />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </main>
+    <div className="min-h-screen bg-navy text-foreground bg-[radial-gradient(900px_500px_at_80%_-10%,rgba(34,197,94,0.07),transparent)]">
+      <div className="flex flex-col lg:flex-row">
+        {/* Sidebar */}
+        <aside className="border-b border-border bg-surface/20 backdrop-blur-sm lg:h-screen lg:w-80 lg:shrink-0 lg:sticky lg:top-0 lg:overflow-y-auto lg:border-b-0 lg:border-r">
+          <header className="flex items-center gap-2.5 px-6 pt-6 pb-2">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent">
+              <FishSimple size={20} weight="fill" />
+            </span>
+            <div className="min-w-0">
+              <h1 className="text-lg font-bold leading-tight tracking-tight">PhishOrNot</h1>
+              <p className="text-[11px] text-muted">3-stage phishing detector</p>
+            </div>
+          </header>
+          <Dashboard history={history} />
+          <HistoryPanel history={history} onSelect={selectHistoryItem} onClear={clearHistory} />
+        </aside>
+
+        {/* Main */}
+        <main className="min-w-0 flex-1 px-4 py-8 sm:px-8 lg:py-12">
+          <div className="mx-auto max-w-2xl space-y-6">
+            <div>
+              <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">Is this URL safe?</h2>
+              <p className="mt-1.5 text-sm text-muted">
+                Paste a link and PhishOrNot will analyze it with an ML model, page content,
+                and deep analysis.
+              </p>
+            </div>
+
+            <UrlInput url={url} onChange={setUrl} onSubmit={handleSubmit} loading={loading} />
+
+            {error && (
+              <div className="flex items-start gap-2.5 rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-[#FCA5A5]">
+                <WarningCircle size={18} weight="fill" className="mt-0.5 shrink-0 text-destructive" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            {loading && (
+              <div className="flex items-center justify-center gap-3 rounded-2xl border border-border bg-surface p-5 text-sm text-muted">
+                <SpinnerGap size={18} className="animate-spin text-accent" />
+                Analyzing URL — checking features, page content, and signals...
+              </div>
+            )}
+
+            {result && !loading && <ResultCard result={result} resultId={resultId} />}
+          </div>
+        </main>
+      </div>
     </div>
   )
 }

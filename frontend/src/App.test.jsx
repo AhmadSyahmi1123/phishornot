@@ -1,15 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 
 describe('App', () => {
   it('renders without crashing', () => {
-    render(
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    )
-    expect(screen.getByText('phishornot?')).toBeDefined()
+    render(<App />)
+    expect(screen.getByRole('heading', { name: /is this url safe/i })).toBeDefined()
+    expect(screen.getByPlaceholderText('https://example.com')).toBeDefined()
+    expect(screen.getByRole('button', { name: /check url/i })).toBeDefined()
   })
 })

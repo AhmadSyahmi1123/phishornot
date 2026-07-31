@@ -1,126 +1,140 @@
 import { useMemo } from 'react'
+import { ChartBar, QuestionMark, ShieldCheck, WarningCircle } from '@phosphor-icons/react'
+
+const TIER_BADGE = {
+  safe: 'bg-[#22C55E]/10 text-[#22C55E]',
+  unsure: 'bg-[#F59E0B]/10 text-[#F59E0B]',
+  phishing: 'bg-[#EF4444]/10 text-[#EF4444]',
+}
+
+function shortUrl(u) {
+  try {
+    const p = new URL(u)
+    return `${p.hostname}${p.pathname}${p.search}`.replace(/^www\./, '')
+  } catch {
+    return u
+  }
+}
 
 export default function Dashboard({ history }) {
   const stats = useMemo(() => {
     const total = history.length
     const phishing = history.filter((h) => h.tier === 'phishing').length
     const unsure = history.filter((h) => h.tier === 'unsure').length
-    const legitimate = total - phishing - unsure
-    const phishingPct = total ? ((phishing / total) * 100).toFixed(1) : 0
-    const legitPct = total ? ((legitimate / total) * 100).toFixed(1) : 0
-    const unsurePct = total ? ((unsure / total) * 100).toFixed(1) : 0
+    const safe = total - phishing - unsure
+    const pct = (n) => (total ? Math.round((n / total) * 100) : 0)
 
     const domainCounts = {}
-    history.forEach((h) => {
+    for (const h of history) {
       try {
-        const domain = new URL(h.url).hostname
-        domainCounts[domain] = (domainCounts[domain] || 0) + 1
+        const host = new URL(h.url).hostname.replace(/^www\./, '')
+        domainCounts[host] = (domainCounts[host] || 0) + 1
       } catch {
-        // ignore invalid URLs
+        // ignore unparseable URLs
       }
-    })
+    }
     const topDomains = Object.entries(domainCounts)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
+      .slice(0, 5)
 
-    const recent = [...history].reverse().slice(0, 10)
-
-    return { total, phishing, unsure, legitimate, phishingPct, legitPct, unsurePct, topDomains, recent }
+    return { total, phishing, unsure, safe, pct, topDomains, recent: history.slice(0, 5) }
   }, [history])
 
-  if (stats.total === 0) {
-    return (
-      <div className="text-center py-12 text-text-muted">
-        No data yet. Check some URLs to see dashboard stats.
-      </div>
-    )
-  }
+  const cards = [
+    { label: 'Total', value: stats.total, pct: 100, cls: 'text-foreground', icon: ChartBar },
+    {
+      label: 'Phishing',
+      value: stats.phishing,
+      pct: stats.pct(stats.phishing),
+      cls: 'text-[#EF4444]',
+      icon: WarningCircle,
+    },
+    {
+      label: 'Unsure',
+      value: stats.unsure,
+      pct: stats.pct(stats.unsure),
+      cls: 'text-[#F59E0B]',
+      icon: QuestionMark,
+    },
+    {
+      label: 'Safe',
+      value: stats.safe,
+      pct: stats.pct(stats.safe),
+      cls: 'text-[#22C55E]',
+      icon: ShieldCheck,
+    },
+  ]
 
   return (
-    <div className="space-y-5">
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        <div className="bg-surface border border-border rounded-2xl p-5 shadow-sm hover:scale-[1.02] hover:shadow-md motion-safe:transition-all duration-200">
-          <p className="text-xs text-text-muted uppercase tracking-wider">Total Checks</p>
-          <p className="text-3xl font-bold text-[#F8FAFC] mt-1">{stats.total}</p>
-        </div>
-        <div className="bg-surface border border-border rounded-2xl p-5 shadow-sm hover:scale-[1.02] hover:shadow-md motion-safe:transition-all duration-200">
-          <p className="text-xs text-text-muted uppercase tracking-wider">Phishing</p>
-          <p className="text-3xl font-bold text-destructive mt-1">{stats.phishing}</p>
-        </div>
-        <div className="bg-surface border border-border rounded-2xl p-5 shadow-sm hover:scale-[1.02] hover:shadow-md motion-safe:transition-all duration-200">
-          <p className="text-xs text-text-muted uppercase tracking-wider">Legitimate</p>
-          <p className="text-3xl font-bold text-accent mt-1">{stats.legitimate}</p>
-        </div>
-        <div className="bg-surface border border-border rounded-2xl p-5 shadow-sm hover:scale-[1.02] hover:shadow-md motion-safe:transition-all duration-200">
-          <p className="text-xs text-text-muted uppercase tracking-wider">Unsure</p>
-          <p className="text-3xl font-bold text-[#F59E0B] mt-1">{stats.unsure}</p>
-        </div>
+    <section>
+      <h2 className="flex items-center gap-2 px-6 pt-5 text-xs font-semibold uppercase tracking-wider text-muted">
+        <ChartBar size={14} className="text-accent" />
+        Dashboard
+      </h2>
+
+      <div className="mt-2.5 grid grid-cols-2 gap-2 px-6">
+        {cards.map((c) => (
+          <div key={c.label} className="rounded-xl border border-border bg-surface p-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted">
+                {c.label}
+              </p>
+              <c.icon size={14} weight="fill" className={c.cls} />
+            </div>
+            <p className={`mt-1 text-2xl font-bold ${c.cls}`}>{c.value}</p>
+            <p className="text-[10px] text-muted">{c.pct}% of checks</p>
+          </div>
+        ))}
       </div>
 
-      {/* Ratio Bar */}
-      <div className="bg-surface border border-border rounded-2xl p-5 shadow-sm hover:scale-[1.02] hover:shadow-md motion-safe:transition-all duration-200">
-        <h3 className="text-sm font-semibold text-[#F8FAFC] mb-3">Phishing vs Legitimate Ratio</h3>
-        <div className="w-full bg-[#0F172A] rounded-full h-6 overflow-hidden flex">
-          <div
-            className="bg-destructive h-full motion-safe:transition-all duration-500 flex items-center justify-center text-xs font-bold text-white"
-            style={{ width: `${stats.phishingPct}%` }}
-          >
-            {stats.phishingPct > 8 ? `${stats.phishingPct}%` : ''}
-          </div>
-          <div
-            className="bg-accent h-full motion-safe:transition-all duration-500 flex items-center justify-center text-xs font-bold text-[#0F172A]"
-            style={{ width: `${stats.legitPct}%` }}
-          >
-            {stats.legitPct > 8 ? `${stats.legitPct}%` : ''}
-          </div>
-        </div>
-        <div className="flex justify-between text-xs text-text-muted mt-2">
-          <span className="text-destructive">Phishing</span>
-          <span className="text-accent">Legitimate</span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {/* Recent Checks */}
-        <div className="bg-surface border border-border rounded-2xl p-5 shadow-sm hover:scale-[1.02] hover:shadow-md motion-safe:transition-all duration-200">
-          <h3 className="text-sm font-semibold text-[#F8FAFC] mb-3">Recent Checks</h3>
-          <div className="space-y-2">
-            {stats.recent.map((item) => (
-              <div key={item.id} className="flex items-center justify-between text-sm">
-                <span className="text-text-muted truncate flex-1 mr-2">{item.url}</span>
-                <span
-                  className={`text-xs font-semibold px-2 py-0.5 rounded shrink-0 ${
-                    item.tier === 'phishing'
-                      ? 'bg-destructive-muted text-destructive'
-                      : item.tier === 'unsure'
-                        ? 'bg-[#F59E0B]/10 text-[#F59E0B]'
-                        : 'bg-accent-muted text-accent'
-                  }`}
-                >
-                  {item.tier === 'phishing' ? 'Phishing' : item.tier === 'unsure' ? 'Unsure' : 'Safe'}
-                </span>
-              </div>
-            ))}
-          </div>
+      <div className="mt-2 grid gap-2 px-6">
+        <div className="rounded-xl border border-border bg-surface p-3">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+            Top domains
+          </h3>
+          {stats.topDomains.length === 0 ? (
+            <p className="mt-2 text-xs text-muted">None yet</p>
+          ) : (
+            <ul className="mt-2 space-y-1.5">
+              {stats.topDomains.map(([domain, count], i) => (
+                <li key={domain} className="flex items-center gap-2 text-xs">
+                  <span className="w-4 shrink-0 text-right text-muted/60">{i + 1}</span>
+                  <span className="min-w-0 flex-1 truncate text-foreground/90">{domain}</span>
+                  <span className="shrink-0 rounded bg-navy/60 px-1.5 py-0.5 font-mono text-[10px] text-muted">
+                    {count}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
-        {/* Top Domains */}
-        <div className="bg-surface border border-border rounded-2xl p-5 shadow-sm hover:scale-[1.02] hover:shadow-md motion-safe:transition-all duration-200">
-          <h3 className="text-sm font-semibold text-[#F8FAFC] mb-3">Most Checked Domains</h3>
-          <div className="space-y-2">
-            {stats.topDomains.map(([domain, count], i) => (
-              <div key={domain} className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-xs text-text-muted/50 w-5 text-right shrink-0">{i + 1}.</span>
-                  <span className="text-text-muted truncate">{domain}</span>
-                </div>
-                <span className="text-text-muted text-xs shrink-0 ml-2">{count} check{count > 1 ? 's' : ''}</span>
-              </div>
-            ))}
-          </div>
+        <div className="rounded-xl border border-border bg-surface p-3">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+            Recent checks
+          </h3>
+          {stats.recent.length === 0 ? (
+            <p className="mt-2 text-xs text-muted">None yet</p>
+          ) : (
+            <ul className="mt-2 space-y-1.5">
+              {stats.recent.map((item) => (
+                <li key={item.id} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="min-w-0 truncate font-mono text-muted">
+                    {shortUrl(item.url)}
+                  </span>
+                  <span
+                    className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                      TIER_BADGE[item.tier] || TIER_BADGE.unsure
+                    }`}
+                  >
+                    {item.tier || 'unknown'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
-    </div>
+    </section>
   )
 }
