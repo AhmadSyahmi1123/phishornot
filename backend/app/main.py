@@ -351,8 +351,9 @@ async def explain(request: Request, data: URLRequest):
             fused = fuse_with_llm(final_score, deep_confidence)
             final_score = fused["score"]
             tier = decide_tier(final_score)
+            impact = "safe" if classification == "legitimate" else "phishing"
             for r in llm.get("reasons", []):
-                reasons.append({"text": r, "source": "deep_analysis", "impact": classification})
+                reasons.append({"text": r, "source": "deep_analysis", "impact": impact})
 
     result = {
         "result_id": make_result_id(cleaned),
