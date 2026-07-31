@@ -5,7 +5,10 @@ import ResultCard from './components/ResultCard'
 import HistoryPanel from './components/HistoryPanel'
 import Dashboard from './components/Dashboard'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+const DEFAULT_API_BASE = import.meta.env.PROD
+  ? 'https://phishornot-backend.onrender.com'
+  : 'http://localhost:8000'
+const API_BASE = import.meta.env.VITE_API_BASE || DEFAULT_API_BASE
 const HISTORY_KEY = 'phishornot_history'
 const MAX_HISTORY = 50
 
