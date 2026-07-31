@@ -75,7 +75,8 @@ export default function App() {
     async (target) => {
       const cleanUrl = target.trim()
       if (!cleanUrl || loading) return
-      lastRequested.current = null
+      const token = Symbol()
+      lastRequested.current = token
       setLoading(true)
       setError(null)
       setResult(null)
@@ -102,10 +103,13 @@ export default function App() {
           data = await predictRes.json()
         }
       } catch (err) {
+        if (lastRequested.current !== token) return
         setError(err.message || 'Could not reach the analysis service.')
         setLoading(false)
         return
       }
+
+      if (lastRequested.current !== token) return
 
       const entry = {
         id: data.result_id,
